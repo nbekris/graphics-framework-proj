@@ -31,14 +31,9 @@ using namespace gl;
 
 
 Object::Object(Shape* _shape, const int _objectId,
-               const glm::vec3 _diffuseColor, 
-               const glm::vec3 _specularColor, 
-               const float _shininess, Texture* _texture)
-    : diffuseColor(_diffuseColor), 
-    specularColor(_specularColor), 
-    shininess(_shininess), shape(_shape), 
-    objectId(_objectId), texture(_texture),
-    drawMe(true)
+               const glm::vec3 _diffuseColor, const glm::vec3 _specularColor, const float _shininess, Texture* _texture, Texture* _normalTexture)
+    : diffuseColor(_diffuseColor), specularColor(_specularColor), shininess(_shininess),
+      shape(_shape), texture(_texture), normalTexture(_normalTexture), objectId(_objectId), drawMe(true)
      
 {}
 
@@ -82,24 +77,36 @@ void Object::Draw(ShaderProgram* program, glm::mat4& objectTr)
     // load the texture into a texture-unit of your choice and inform
     // the shader program of the texture-unit number.  See
     // Texture::Bind for the 4 lines of code to do exactly that.
+    
 
     // Draw this object
-    int unit = 0;
     CHECKERROR;
-    if (shape)
+    if (shape && drawMe) 
     {
-        if (drawMe) {
-            if (texture)
-            {
-                glm::mat4 tr = texture->textureTr;
-                loc = glGetUniformLocation(program->programId, "TextureTr");
-                glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(tr));
-                texture->BindTexture(unit, program->programId, "tex");
-            }
-            shape->DrawVAO();
-            if (texture) texture->UnbindTexture(unit);
+        if (texture)
+        {
+            texture->BindTexture(0, program->programId, "tex");
+
+            loc = glGetUniformLocation(program->programId, "hasTexture");
+            glUniform1f(loc, 1);
         }
+
+        if (normalTexture)
+        {
+            normalTexture->BindTexture(1, program->programId, "normalTex");
+
+            loc = glGetUniformLocation(program->programId, "hasNormal");
+            glUniform1f(loc, 1);
+
+            float currentTime = glfwGetTime();
+            loc = glGetUniformLocation(program->programId, "time");
+            glUniform1f(loc, currentTime);
+        }
+        shape->DrawVAO();
+        if (normalTexture) normalTexture->UnbindTexture(1);
+        if (texture) texture->UnbindTexture(0);
     }
+
     CHECKERROR;
 
 

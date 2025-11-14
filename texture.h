@@ -19,12 +19,10 @@ class Texture
     unsigned int textureId;
     int width, height, depth;
     unsigned char* image;
-    glm::mat4 textureTr;
     Texture();
-    Texture(const std::string &filename, const glm::mat4 _textureTr);
+    Texture(const std::string &filename);
 
-    void BindTexture(const int unit, const int programId, 
-        const std::string& name) const;
+    void BindTexture(const int unit, const int programId, const std::string& name);
     void UnbindTexture(const int unit);
 };
 

@@ -28,8 +28,7 @@ using namespace gl;
 
 Texture::Texture() : textureId(0) {}
 
-Texture::Texture(const std::string &path, glm::mat4 _textureTr) :
-    textureId(0), textureTr(_textureTr)
+Texture::Texture(const std::string &path) : textureId(0)
 {
     stbi_set_flip_vertically_on_load(true);
     image = stbi_load(path.c_str(), &width, &height, &depth, 4);
@@ -42,9 +41,10 @@ Texture::Texture(const std::string &path, glm::mat4 _textureTr) :
     glBindTexture(GL_TEXTURE_2D, textureId);
     glTexImage2D(GL_TEXTURE_2D, 0, (GLint)GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, image);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 10);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (int)GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (int)GL_LINEAR_MIPMAP_LINEAR);
     glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (int)GL_LINEAR);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (int)GL_LINEAR_MIPMAP_LINEAR);  
     glBindTexture(GL_TEXTURE_2D, 0);
     stbi_image_free(image);
 }
@@ -54,7 +54,7 @@ Texture::Texture(const std::string &path, glm::mat4 _textureTr) :
 // a small integer specifying which texture unit should load the
 // texture.  The name parameter is the sampler2d in the shader program
 // which will provide access to the texture.
-void Texture::BindTexture(const int unit, const int programId, const std::string& name) const
+void Texture::BindTexture(const int unit, const int programId, const std::string& name)
 {
     glActiveTexture((gl::GLenum)((int)GL_TEXTURE0 + unit));
     glBindTexture(GL_TEXTURE_2D, textureId);
