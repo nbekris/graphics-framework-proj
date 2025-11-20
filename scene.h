@@ -84,6 +84,7 @@ public:
     // Shader programs
     ShaderProgram* lightingProgram;
     // @@ Declare additional shaders if necessary
+    ShaderProgram* shadowProgram;
 
 
     // Options menu stuff
@@ -93,5 +94,5 @@ public:
     void BuildTransforms();
     void DrawMenu();
     void DrawScene();
-
+    void CreateShader();
 };

@@ -5,7 +5,7 @@
 ////////////////////////////////////////////////////////////////////////
 #version 330
 
-uniform mat4 WorldView, WorldInverse, WorldProj, ModelTr, NormalTr;
+uniform mat4 WorldView, WorldInverse, WorldProj, ModelTr, NormalTr, ShadowMatrix;
 
 in vec4 vertex;
 in vec3 vertexNormal;
@@ -15,16 +15,19 @@ in vec3 vertexTangent;
 out vec3 normalVec, lightVec, eyeVec;
 out vec3 tanVec;
 out vec2 texCoord;
+out vec4 shadowCoord;
 uniform vec3 lightPos;
 
 void main()
 {      
 	vec3 worldPos = (ModelTr*vertex).xyz;
 
-    normalVec = mat3(NormalTr) * vertexNormal; 
+	shadowCoord = ShadowMatrix * ModelTr * vertex;
+
+    normalVec =  vertexNormal * mat3(NormalTr);
 	
 	// Compute vectors toward light and eye and output them to frag shader
-	vec3 eyePos = (WorldInverse*vec4(0, 0, 0, 1)).xyz; // maybe missing ()
+	vec3 eyePos = (WorldInverse*vec4(0, 0, 0, 1)).xyz;
 	lightVec = lightPos - worldPos;
 	eyeVec = eyePos - worldPos;
 	

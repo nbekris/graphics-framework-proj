@@ -102,6 +102,7 @@ void Object::Draw(ShaderProgram* program, glm::mat4& objectTr)
             loc = glGetUniformLocation(program->programId, "time");
             glUniform1f(loc, currentTime);
         }
+
         shape->DrawVAO();
         if (normalTexture) normalTexture->UnbindTexture(1);
         if (texture) texture->UnbindTexture(0);

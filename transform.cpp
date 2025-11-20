@@ -80,4 +80,31 @@ glm::mat4 Perspective(const float rx, const float ry,
     return P;
 }
 
+glm::mat4 LookAt(const glm::vec3 Eye, const glm::vec3 Center, const glm::vec3 Up)
+{
+    glm::vec3 V = (Center - Eye);
+    glm::vec3 A = glm::cross(V, Up);
+    V = glm::normalize(V);
+    A = glm::normalize(A);
+    glm::vec3 B = glm::cross(A, V);
+
+    glm::mat4 const eye = Translate(-Eye.x, -Eye.y, -Eye.z);
+    glm::mat4 R(1.0);
+
+    R[0][0] = A.x;
+    R[1][0] = A.y;
+    R[2][0] = A.z;
+
+    R[0][1] = B.x;
+    R[1][1] = B.y;
+    R[2][1] = B.z;
+
+    R[0][2] = -V.x;
+    R[1][2] = -V.y;
+    R[2][2] = -V.z;
+
+
+    return R * eye;
+}
+
 

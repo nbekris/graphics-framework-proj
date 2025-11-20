@@ -42,6 +42,10 @@ const float PI = 3.14159f;
 const float rad = PI/180.0f;    // Convert degrees to radians
 
 glm::mat4 Identity(1.0);
+glm::mat4 ShadowMatrix;
+glm::mat4 ShadowView;
+glm::mat4 ShadowProj;
+FBO fbo;
 
 const float grndSize = 100.0;    // Island radius;  Minimum about 20;  Maximum 1000 or so
 const float grndOctaves = 4.0;  // Number of levels of detail to compute
@@ -49,6 +53,8 @@ const float grndFreq = 0.03;    // Number of hills per (approx) 50m
 const float grndPersistence = 0.03; // Terrain roughness: Slight:0.01  rough:0.05
 const float grndLow = -3.0;         // Lowest extent below sea level
 const float grndHigh = 5.0;        // Highest extent above sea level
+
+const bool showSpheres = true;
 
 ////////////////////////////////////////////////////////////////////////
 // This macro makes it easy to sprinkle checks for OpenGL errors
@@ -171,6 +177,7 @@ void Scene::InitializeScene()
     CHECKERROR;
     objectRoot = new Object(NULL, nullId);
 
+    fbo.CreateFBO(1000, 1000);
     
     // Enable OpenGL depth-testing
     glEnable(GL_DEPTH_TEST);
@@ -181,11 +188,21 @@ void Scene::InitializeScene()
     lightingProgram->AddShader("lighting.vert", GL_VERTEX_SHADER);
     lightingProgram->AddShader("lighting.frag", GL_FRAGMENT_SHADER);
 
+    shadowProgram = new ShaderProgram();
+    shadowProgram->AddShader("shadow.frag", GL_FRAGMENT_SHADER);
+    shadowProgram->AddShader("shadow.vert", GL_VERTEX_SHADER);
+
     glBindAttribLocation(lightingProgram->programId, 0, "vertex");
     glBindAttribLocation(lightingProgram->programId, 1, "vertexNormal");
     glBindAttribLocation(lightingProgram->programId, 2, "vertexTexture");
     glBindAttribLocation(lightingProgram->programId, 3, "vertexTangent");
     lightingProgram->LinkProgram();
+
+    glBindAttribLocation(shadowProgram->programId, 0, "vertex");
+    glBindAttribLocation(shadowProgram->programId, 1, "vertexNormal");
+    glBindAttribLocation(shadowProgram->programId, 2, "vertexTexture");
+    glBindAttribLocation(shadowProgram->programId, 3, "vertexTangent");
+    shadowProgram->LinkProgram();
 
 
     
@@ -368,8 +385,8 @@ void Scene::BuildTransforms()
 
     // @@ Print the two matrices (in column-major order) for
     // comparison with the project document.
-    std::cout << "WorldView: " << glm::to_string(WorldView) << std::endl;
-    std::cout << "WorldProj: " << glm::to_string(WorldProj) << std::endl;
+    //std::cout << "WorldView: " << glm::to_string(WorldView) << std::endl;
+    //std::cout << "WorldProj: " << glm::to_string(WorldProj) << std::endl;
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -426,8 +443,14 @@ void Scene::DrawScene()
 
     // The lighting algorithm needs the inverse of the WorldView matrix
     WorldInverse = glm::inverse(WorldView);
-    
 
+
+    CreateShader();
+
+}
+
+void Scene::CreateShader()
+{
     ////////////////////////////////////////////////////////////////////////////////
     // Anatomy of a pass:
     //   Choose a shader  (create the shader in InitializeScene above)
@@ -444,27 +467,68 @@ void Scene::DrawScene()
     int loc, programId;
 
     ////////////////////////////////////////////////////////////////////////////////
+    // Shadow pass
+    ////////////////////////////////////////////////////////////////////////////////
+
+    shadowProgram->UseShader();
+    programId = shadowProgram->programId;
+
+    fbo.BindFBO();
+
+    ShadowView = LookAt(lightPos, glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    ShadowProj = Perspective(40 / lightDist, 40 / lightDist, front, back);
+
+    // Set the viewport, and clear the screen
+    glViewport(0, 0, 1000, 1000); //set variable
+    glClearColor(0.5, 0.5, 0.5, 1.0);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    // Set Light
+    glm::vec3 Light(3, 3, 3);
+    glm::vec3 Ambient(0.4, 0.4, 0.4);
+
+    loc = glGetUniformLocation(programId, "ProjectionMatrix");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowProj));
+    loc = glGetUniformLocation(programId, "ViewMatrix");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowView));
+
+    // Draw all objects (This recursively traverses the object hierarchy.)
+    CHECKERROR;
+    objectRoot->Draw(shadowProgram, Identity);
+    CHECKERROR;
+
+    // Turn off the shader
+    shadowProgram->UnuseShader();
+    fbo.UnbindFBO();
+
+    ////////////////////////////////////////////////////////////////////////////////
+    // End of Shadow pass
+    ////////////////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////////////////
     // Lighting pass
     ////////////////////////////////////////////////////////////////////////////////
-    
+
     // Choose the lighting shader
     lightingProgram->UseShader();
     programId = lightingProgram->programId;
 
+    fbo.BindTexture(2, programId, "shadowMap");
+
     // Set the viewport, and clear the screen
     glViewport(0, 0, width, height);
     glClearColor(0.5, 0.5, 0.5, 1.0);
-    glClear(GL_COLOR_BUFFER_BIT| GL_DEPTH_BUFFER_BIT);
-
-    // Set Light
-    glm::vec3 Light(3, 3, 3);
-    glm::vec3 Ambient(0.15, 0.15, 0.15);
-
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     // @@ The scene specific parameters (uniform variables) used by
     // the shader are set here.  Object specific parameters are set in
     // the Draw procedure in object.cpp
-    
+
+    glm::mat4 B = Translate(0.5f, 0.5f, 0.5f) * Scale(0.5f, 0.5f, 0.5f);
+    ShadowMatrix = B * ShadowProj * ShadowView;
+
+    loc = glGetUniformLocation(programId, "ShadowMatrix");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowMatrix));
     loc = glGetUniformLocation(programId, "WorldProj");
     glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
     loc = glGetUniformLocation(programId, "WorldView");
@@ -482,11 +546,12 @@ void Scene::DrawScene()
     CHECKERROR;
 
     // Draw all objects (This recursively traverses the object hierarchy.)
-    CHECKERROR;
+    //CHECKERROR;
     objectRoot->Draw(lightingProgram, Identity);
-    CHECKERROR; 
+    //CHECKERROR;
 
-    
+    fbo.UnbindTexture(2);
+
     // Turn off the shader
     lightingProgram->UnuseShader();
 

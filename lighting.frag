@@ -23,10 +23,12 @@ const float PI = 3.14159265359;
 in vec3 normalVec, lightVec, eyeVec;
 in vec2 texCoord;
 in vec3 tanVec;
+in vec4 shadowCoord;
 
 uniform int objectId;
 uniform sampler2D tex;
 uniform sampler2D normalTex;
+uniform sampler2D shadowMap;
 uniform bool hasNormal;
 uniform bool hasTexture;
 uniform float currentTime;
@@ -74,8 +76,31 @@ vec3 SetNormalMap(vec2 uv, vec3 T, vec3 B, vec3 N)
 	return delta.x + delta.y * B + delta.z * N;
 }
 
+bool PixelInShadow()
+{
+	float lightDepth;
+	float pixelDepth;
+	vec2 shadowIndex = shadowCoord.xy / shadowCoord.w;
+	bool isShadowed = false;
+	float bias = 0.005;
+
+	if (shadowCoord.w > 0 && ((shadowIndex.x > 0 && shadowIndex.x < 1) && (shadowIndex.y > 0 && shadowIndex.y < 1)))
+	{
+		lightDepth = texture2D(shadowMap, shadowIndex).w;
+		pixelDepth = shadowCoord.w;
+
+		isShadowed = pixelDepth - bias > lightDepth;
+	}
+
+	return isShadowed;
+}
+
 void main()
 {
+//	vec2 uv = gl_FragCoord.xy/vec2(750,750); // (or whatever screen size)
+//	FragColor.xyz = vec3(texture(shadowMap, uv).w/100.0); // or similar
+//	return; // which disables all further code in the shader.
+
 	vec3 delta;
 	vec3 Kd;
     vec3 N = normalize(normalVec);
@@ -140,13 +165,15 @@ void main()
 		uv = vec2(-atan(R.y, R.x) / (2 * PI), acos(R.z) / PI);
 	}
 
+	Kd = diffuse;
+
 	if (hasTexture) 
 	{
-		Kd = texture(tex, uv).xyz;
+		//Kd = texture(tex, uv).xyz;
 	}
 	else
 	{
-		Kd = diffuse;
+		//Kd = diffuse;
 	}
 
 	if (objectId == rPicId)
@@ -189,6 +216,13 @@ void main()
 		vec3 totalBRDF = Fd + Fs;
 		vec3 directLight = totalBRDF * Light * LN;
 		vec3 ambient = Ambient * Kd;
+
+		//pixel is in shadow if:
+		if (PixelInShadow()) 
+		{
+			FragColor.xyz = ambient;
+			return;
+		}
 
 		FragColor.xyz = directLight + ambient;
 	}
