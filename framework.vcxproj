@@ -148,9 +148,15 @@
     <ClInclude Include="transform.h" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="final.frag" />
+    <None Include="final.vert" />
     <None Include="lighting.frag" />
     <None Include="lighting.vert" />
     <None Include="Makefile" />
+    <None Include="reflectionBottom.frag" />
+    <None Include="reflectionBottom.vert" />
+    <None Include="reflection.frag" />
+    <None Include="reflection.vert" />
     <None Include="room.ply" />
     <None Include="shadow.frag" />
     <None Include="shadow.vert" />

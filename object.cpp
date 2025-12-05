@@ -31,8 +31,8 @@ using namespace gl;
 
 
 Object::Object(Shape* _shape, const int _objectId,
-               const glm::vec3 _diffuseColor, const glm::vec3 _specularColor, const float _shininess, Texture* _texture, Texture* _normalTexture)
-    : diffuseColor(_diffuseColor), specularColor(_specularColor), shininess(_shininess),
+               const glm::vec3 _diffuseColor, const glm::vec3 _specularColor, const float _shininess, bool _reflective, Texture* _texture, Texture* _normalTexture)
+    : diffuseColor(_diffuseColor), specularColor(_specularColor), shininess(_shininess), reflective(_reflective),
       shape(_shape), texture(_texture), normalTexture(_normalTexture), objectId(_objectId), drawMe(true)
      
 {}
@@ -73,6 +73,15 @@ void Object::Draw(ShaderProgram* program, glm::mat4& objectTr)
     loc = glGetUniformLocation(program->programId, "NormalTr");
     glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(inv));
 
+    loc = glGetUniformLocation(program->programId, "hasTexture");
+    glUniform1f(loc, false);
+
+    loc = glGetUniformLocation(program->programId, "hasNormal");
+    glUniform1f(loc, false);
+
+    loc = glGetUniformLocation(program->programId, "reflective");
+    glUniform1i(loc, reflective);
+
     // If this object has an associated texture, this is the place to
     // load the texture into a texture-unit of your choice and inform
     // the shader program of the texture-unit number.  See
@@ -88,7 +97,7 @@ void Object::Draw(ShaderProgram* program, glm::mat4& objectTr)
             texture->BindTexture(0, program->programId, "tex");
 
             loc = glGetUniformLocation(program->programId, "hasTexture");
-            glUniform1f(loc, 1);
+            glUniform1f(loc, true);
         }
 
         if (normalTexture)
@@ -96,7 +105,7 @@ void Object::Draw(ShaderProgram* program, glm::mat4& objectTr)
             normalTexture->BindTexture(1, program->programId, "normalTex");
 
             loc = glGetUniformLocation(program->programId, "hasNormal");
-            glUniform1f(loc, 1);
+            glUniform1f(loc, true);
 
             float currentTime = glfwGetTime();
             loc = glGetUniformLocation(program->programId, "time");

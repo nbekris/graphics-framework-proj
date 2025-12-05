@@ -18,8 +18,8 @@ out vec2 texCoord;
 out vec4 shadowCoord;
 uniform vec3 lightPos;
 
-void main()
-{      
+void LightingVertex(vec3 eye)
+{
 	vec3 worldPos = (ModelTr*vertex).xyz;
 
 	shadowCoord = ShadowMatrix * ModelTr * vertex;
@@ -27,14 +27,12 @@ void main()
     normalVec =  vertexNormal * mat3(NormalTr);
 	
 	// Compute vectors toward light and eye and output them to frag shader
-	vec3 eyePos = (WorldInverse*vec4(0, 0, 0, 1)).xyz;
+	//eye = (WorldInverse*vec4(0, 0, 0, 1)).xyz;
 	lightVec = lightPos - worldPos;
-	eyeVec = eyePos - worldPos;
+	eyeVec = eye - worldPos;
 	
     lightVec = lightPos - worldPos;
 
     texCoord = vertexTexture;
 	tanVec = mat3(ModelTr) * vertexTangent;
-	
-	gl_Position = WorldProj*WorldView*ModelTr*vertex;
 }

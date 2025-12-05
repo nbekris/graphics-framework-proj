@@ -85,6 +85,7 @@ public:
     ShaderProgram* lightingProgram;
     // @@ Declare additional shaders if necessary
     ShaderProgram* shadowProgram;
+	ShaderProgram* reflectionProgram;
 
 
     // Options menu stuff

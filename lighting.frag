@@ -29,9 +29,12 @@ uniform int objectId;
 uniform sampler2D tex;
 uniform sampler2D normalTex;
 uniform sampler2D shadowMap;
+uniform sampler2D reflectionTop;
+uniform sampler2D reflectionBottom;
 uniform bool hasNormal;
 uniform bool hasTexture;
 uniform float currentTime;
+uniform bool reflective;
 
 // Values describing the surface
 uniform vec3 diffuse; //Kd
@@ -86,7 +89,7 @@ bool PixelInShadow()
 
 	if (shadowCoord.w > 0 && ((shadowIndex.x > 0 && shadowIndex.x < 1) && (shadowIndex.y > 0 && shadowIndex.y < 1)))
 	{
-		lightDepth = texture2D(shadowMap, shadowIndex).w;
+		lightDepth = texture(shadowMap, shadowIndex).w;
 		pixelDepth = shadowCoord.w;
 
 		isShadowed = pixelDepth - bias > lightDepth;
@@ -95,11 +98,11 @@ bool PixelInShadow()
 	return isShadowed;
 }
 
-void main()
+vec3 LightingPixel()
 {
-//	vec2 uv = gl_FragCoord.xy/vec2(750,750); // (or whatever screen size)
-//	FragColor.xyz = vec3(texture(shadowMap, uv).w/100.0); // or similar
-//	return; // which disables all further code in the shader.
+	//vec2 testUv = gl_FragCoord.xy/vec2(750,750); // (or whatever screen size)
+	//FragColor.xyz = vec3(texture(reflectionTop, uv).w/100.0); // or similar]
+	//return texture(reflectionTop, testUv).xyz;
 
 	vec3 delta;
 	vec3 Kd;
@@ -115,6 +118,8 @@ void main()
 
 	vec3 T = normalize(tanVec);
 	vec3 B = normalize(cross(T, N));
+
+	float cValue;
 
 	if (objectId==roomId)
 	{
@@ -169,11 +174,11 @@ void main()
 
 	if (hasTexture) 
 	{
-		//Kd = texture(tex, uv).xyz;
+		Kd = texture(tex, uv).xyz;
 	}
 	else
 	{
-		//Kd = diffuse;
+		Kd = diffuse;
 	}
 
 	if (objectId == rPicId)
@@ -217,17 +222,48 @@ void main()
 		vec3 directLight = totalBRDF * Light * LN;
 		vec3 ambient = Ambient * Kd;
 
-		//pixel is in shadow if:
-		if (PixelInShadow()) 
+		// Reflection Calculation ------------------------
+
+		if (reflective)
 		{
-			FragColor.xyz = ambient;
-			return;
+			VN = max(dot(V, N), 0.0);
+			vec3 R = 2.0 * VN * N - V;
+
+			float distR = length(R);
+			vec3 normalR = normalize(R);
+			float a = normalR.x;
+			float b = normalR.y;
+			float c = normalR.z;
+
+			float reflectDir = c > 0.0 ? 1.0 : -1.0; // double check this
+
+			a = (a / (1.0 + (c * reflectDir)));
+			b = (b / (1.0 + (c * reflectDir)));
+
+			vec2 reflectUV = vec2(a, b) * 0.5 + vec2(0.5, 0.5);
+
+			if (reflectDir > 0.0)
+			{
+				return texture(reflectionTop, reflectUV).xyz;
+			}
+			else
+			{
+				return texture(reflectionBottom, reflectUV).xyz;
+			}
 		}
 
-		FragColor.xyz = directLight + ambient;
+		// End Reflection Calculation ------------------------
+
+		if (PixelInShadow()) 
+		{
+			return ambient;
+		}
+
+		return directLight + ambient;
 	}
 	else
 	{
-		FragColor.xyz = Kd;
+		return Kd;
 	}
+	return Kd;
 }

@@ -32,6 +32,7 @@ class Object
     glm::mat4 animTr;                // This model's animation transformation
     int objectId;               // Object id to be sent to the shader
     bool drawMe;                // Toggle specifies if this object (and children) are drawn.
+	bool reflective;           // Is the object reflective?
 
     glm::vec3 diffuseColor;          // Diffuse color of object
     glm::vec3 specularColor;         // Specular color of object
@@ -40,7 +41,7 @@ class Object
     std::vector<INSTANCE> instances; // Pairs of sub-objects and transformations 
 
     Object(Shape* _shape, const int objectId,
-           const glm::vec3 _d=glm::vec3(), const glm::vec3 _s=glm::vec3(), const float _n=1, Texture* _texture = NULL, Texture* _normalTexture = NULL);
+           const glm::vec3 _d=glm::vec3(), const glm::vec3 _s=glm::vec3(), const float _n=1, bool reflective=false, Texture* _texture = NULL, Texture* _normalTexture = NULL);
 
     // If this object is to be drawn with a texture, this is a good
     // place to store the texture id (a small positive integer).  The

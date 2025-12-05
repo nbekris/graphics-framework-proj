@@ -1,0 +1,14 @@
+/////////////////////////////////////////////////////////////////////////
+// Pixel shader for Reflection
+//
+// Copyright 2013 DigiPen Institute of Technology
+////////////////////////////////////////////////////////////////////////
+#version 330
+
+out vec4 FragColor;
+
+vec3 LightingPixel();
+void main()
+{      
+	FragColor.xyz = LightingPixel();
+}

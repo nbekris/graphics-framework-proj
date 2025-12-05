@@ -45,7 +45,10 @@ glm::mat4 Identity(1.0);
 glm::mat4 ShadowMatrix;
 glm::mat4 ShadowView;
 glm::mat4 ShadowProj;
-FBO fbo;
+
+FBO shadowFbo;
+FBO reflectionTopFbo;
+FBO reflectionBottomFbo;
 
 const float grndSize = 100.0;    // Island radius;  Minimum about 20;  Maximum 1000 or so
 const float grndOctaves = 4.0;  // Number of levels of detail to compute
@@ -94,7 +97,7 @@ Object* SphereOfSpheres(Shape* SpherePolygons)
             glm::vec3 hue = HSV2RGB(angle/360.0, 1.0f-2.0f*row/PI, 1.0f);
 
             Object* sp = new Object(SpherePolygons, spheresId,
-                                    hue, glm::vec3(1.0, 1.0, 1.0), 120.0);
+                                    hue, glm::vec3(1.0, 1.0, 1.0), 120.0, false, NULL, NULL);
             float s = sin(row);
             float c = cos(row);
             ob->add(sp, Rotate(2,angle)*Translate(c,0,s)*Scale(0.075*c,0.075*c,0.075*c));
@@ -115,7 +118,7 @@ Object* FramedPicture(const glm::mat4& modelTr, const int objectId,
     
     glm::vec3 woodColor(87.0/255.0,51.0/255.0,35.0/255.0);
     ob = new Object(BoxPolygons, frameId,
-            woodColor, glm::vec3(0.2, 0.2, 0.2), 10.0);
+            woodColor, glm::vec3(0.2, 0.2, 0.2), 10.0, false, NULL, NULL);
 
 
     frame->add(ob, Translate(0.0, 0.0, 1.0+w)*Scale(1.0, w, w));
@@ -125,12 +128,12 @@ Object* FramedPicture(const glm::mat4& modelTr, const int objectId,
     if (Texture) 
     {
         ob = new Object(QuadPolygons, objectId,
-            woodColor, glm::vec3(0.0, 0.0, 0.0), 10.0, Texture);
+            woodColor, glm::vec3(0.0, 0.0, 0.0), 10.0, false, Texture, NULL);
     }
     else
     {
         ob = new Object(QuadPolygons, objectId,
-            woodColor, glm::vec3(0.0, 0.0, 0.0), 10.0);
+            woodColor, glm::vec3(0.0, 0.0, 0.0), 10.0, false, NULL, NULL);
     }
 
     frame->add(ob, Rotate(0,90));
@@ -177,7 +180,9 @@ void Scene::InitializeScene()
     CHECKERROR;
     objectRoot = new Object(NULL, nullId);
 
-    fbo.CreateFBO(1000, 1000);
+    shadowFbo.CreateFBO(1000, 1000);
+	reflectionTopFbo.CreateFBO(1024, 1024);
+	reflectionBottomFbo.CreateFBO(1024, 1024);
     
     // Enable OpenGL depth-testing
     glEnable(GL_DEPTH_TEST);
@@ -185,12 +190,20 @@ void Scene::InitializeScene()
     // Create the lighting shader program from source code files.
     // @@ Initialize additional shaders if necessary
     lightingProgram = new ShaderProgram();
+    lightingProgram->AddShader("final.vert", GL_VERTEX_SHADER);
+    lightingProgram->AddShader("final.frag", GL_FRAGMENT_SHADER);
     lightingProgram->AddShader("lighting.vert", GL_VERTEX_SHADER);
     lightingProgram->AddShader("lighting.frag", GL_FRAGMENT_SHADER);
 
     shadowProgram = new ShaderProgram();
     shadowProgram->AddShader("shadow.frag", GL_FRAGMENT_SHADER);
     shadowProgram->AddShader("shadow.vert", GL_VERTEX_SHADER);
+
+	reflectionProgram = new ShaderProgram();
+	reflectionProgram->AddShader("reflection.frag", GL_FRAGMENT_SHADER);
+	reflectionProgram->AddShader("reflection.vert", GL_VERTEX_SHADER);
+    reflectionProgram->AddShader("lighting.vert", GL_VERTEX_SHADER);
+    reflectionProgram->AddShader("lighting.frag", GL_FRAGMENT_SHADER);
 
     glBindAttribLocation(lightingProgram->programId, 0, "vertex");
     glBindAttribLocation(lightingProgram->programId, 1, "vertexNormal");
@@ -203,6 +216,12 @@ void Scene::InitializeScene()
     glBindAttribLocation(shadowProgram->programId, 2, "vertexTexture");
     glBindAttribLocation(shadowProgram->programId, 3, "vertexTangent");
     shadowProgram->LinkProgram();
+
+    glBindAttribLocation(reflectionProgram->programId, 0, "vertex");
+    glBindAttribLocation(reflectionProgram->programId, 1, "vertexNormal");
+    glBindAttribLocation(reflectionProgram->programId, 2, "vertexTexture");
+    glBindAttribLocation(reflectionProgram->programId, 3, "vertexTangent");
+    reflectionProgram->LinkProgram();
 
 
     
@@ -258,13 +277,13 @@ void Scene::InitializeScene()
     
     central    = new Object(NULL, nullId);
     anim       = new Object(NULL, nullId);
-    room       = new Object(RoomPolygons, roomId, brickColor, noSpec, 2, roomTexture, roomNormal);
-    floor      = new Object(FloorPolygons, floorId, floorColor, noSpec, 2, floorTexture, floorNormal);
-    teapot     = new Object(TeapotPolygons, teapotId, brassColor, brightSpec, 100, teapotTexture);
-    podium     = new Object(BoxPolygons, boxId, glm::vec3(woodColor), brightSpec, 5, podiumTexture, podiumNormal);
-    sky        = new Object(SpherePolygons, skyId, noSpec, noSpec, 0, skyTexture);
-    ground     = new Object(GroundPolygons, groundId, grassColor, noSpec, 3, groundTexture);
-    sea        = new Object(SeaPolygons, seaId, waterColor, brightSpec, 100, skyTexture, seaNormal);
+    room       = new Object(RoomPolygons, roomId, brickColor, noSpec, 2, false, roomTexture, roomNormal);
+    floor      = new Object(FloorPolygons, floorId, floorColor, noSpec, 2, false, floorTexture, floorNormal);
+    teapot     = new Object(TeapotPolygons, teapotId, brassColor, brightSpec, 100, true, teapotTexture);
+    podium     = new Object(BoxPolygons, boxId, glm::vec3(woodColor), brightSpec, 5, false, podiumTexture, podiumNormal);
+    sky        = new Object(SpherePolygons, skyId, noSpec, noSpec, 0, false, skyTexture);
+    ground     = new Object(GroundPolygons, groundId, grassColor, noSpec, 3, false, groundTexture);
+    sea        = new Object(SeaPolygons, seaId, waterColor, brightSpec, 100, false, skyTexture, seaNormal);
     leftFrame  = FramedPicture(Identity, lPicId, BoxPolygons, QuadPolygons);
     rightFrame = FramedPicture(Identity, rPicId, BoxPolygons, QuadPolygons, rightFrameTexture); 
     spheres    = SphereOfSpheres(SpherePolygons);
@@ -282,7 +301,7 @@ void Scene::InitializeScene()
 
     // Scene is composed of sky, ground, sea, room and some central models
     if (fullPolyCount) {
-        objectRoot->add(sky, Scale(4000.0, 4000.0, 4000.0));
+        objectRoot->add(sky, Scale(2000.0, 2000.0, 2000.0));
         objectRoot->add(sea); 
         objectRoot->add(ground); }
     objectRoot->add(central);
@@ -473,7 +492,7 @@ void Scene::CreateShader()
     shadowProgram->UseShader();
     programId = shadowProgram->programId;
 
-    fbo.BindFBO();
+    shadowFbo.BindFBO();
 
     ShadowView = LookAt(lightPos, glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
     ShadowProj = Perspective(40 / lightDist, 40 / lightDist, front, back);
@@ -498,34 +517,84 @@ void Scene::CreateShader()
     CHECKERROR;
 
     // Turn off the shader
+    shadowFbo.UnbindFBO();
     shadowProgram->UnuseShader();
-    fbo.UnbindFBO();
 
     ////////////////////////////////////////////////////////////////////////////////
     // End of Shadow pass
     ////////////////////////////////////////////////////////////////////////////////
 
     ////////////////////////////////////////////////////////////////////////////////
-    // Lighting pass
+    // Reflection pass
     ////////////////////////////////////////////////////////////////////////////////
 
-    // Choose the lighting shader
-    lightingProgram->UseShader();
-    programId = lightingProgram->programId;
+	reflectionProgram->UseShader();
+	programId = reflectionProgram->programId;
 
-    fbo.BindTexture(2, programId, "shadowMap");
+    shadowFbo.BindTexture(2, programId, "shadowMap");
+
+	reflectionTopFbo.BindFBO();
 
     // Set the viewport, and clear the screen
-    glViewport(0, 0, width, height);
-    glClearColor(0.5, 0.5, 0.5, 1.0);
+    glViewport(0, 0, reflectionTopFbo.width, reflectionTopFbo.height);
+    glClearColor(1.0, 0.0, 1.0, 1.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    // @@ The scene specific parameters (uniform variables) used by
-    // the shader are set here.  Object specific parameters are set in
-    // the Draw procedure in object.cpp
 
     glm::mat4 B = Translate(0.5f, 0.5f, 0.5f) * Scale(0.5f, 0.5f, 0.5f);
     ShadowMatrix = B * ShadowProj * ShadowView;
+
+    glm::vec3 eye = glm::vec3(0.0f, 0.0f, 1.5f);
+	float reflectDir = 1.0f;  
+
+    loc = glGetUniformLocation(programId, "Eye");
+    glUniform3fv(loc, 1, &(eye[0]));
+    loc = glGetUniformLocation(programId, "ReflectDir");
+    glUniform1fv(loc, 1, &reflectDir);
+
+    loc = glGetUniformLocation(programId, "ShadowMatrix");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowMatrix));
+    loc = glGetUniformLocation(programId, "WorldProj");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
+    loc = glGetUniformLocation(programId, "WorldInverse");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldInverse));
+    loc = glGetUniformLocation(programId, "lightPos");
+    glUniform3fv(loc, 1, &(lightPos[0]));
+    loc = glGetUniformLocation(programId, "Light");
+    glUniform3fv(loc, 1, &(Light[0]));
+    loc = glGetUniformLocation(programId, "Ambient");
+    glUniform3fv(loc, 1, &(Ambient[0]));
+    loc = glGetUniformLocation(programId, "mode");
+    glUniform1i(loc, mode);
+
+    // Draw all objects (This recursively traverses the object hierarchy.)
+    CHECKERROR;
+    teapot->drawMe = false; // Do not draw the teapot in reflection
+    objectRoot->Draw(reflectionProgram, Identity);
+    CHECKERROR;
+
+    // Turn off the shader
+    reflectionProgram->UnuseShader();
+    reflectionTopFbo.UnbindFBO();
+
+    //////////////////////////
+    // Bottom Reflection pass
+    //////////////////////////
+
+    reflectionProgram->UseShader();
+
+    reflectionBottomFbo.BindFBO();
+
+    // Set the viewport, and clear the screen
+    glViewport(0, 0, reflectionBottomFbo.width, reflectionBottomFbo.height);
+    glClearColor(0.5, 0.5, 0.5, 1.0);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    reflectDir = -1.0f;
+
+    loc = glGetUniformLocation(programId, "Eye");
+    glUniform3fv(loc, 1, &(eye[0]));
+    loc = glGetUniformLocation(programId, "ReflectDir");
+    glUniform1fv(loc, 1, &reflectDir);
 
     loc = glGetUniformLocation(programId, "ShadowMatrix");
     glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowMatrix));
@@ -543,14 +612,75 @@ void Scene::CreateShader()
     glUniform3fv(loc, 1, &(Ambient[0]));
     loc = glGetUniformLocation(programId, "mode");
     glUniform1i(loc, mode);
-    CHECKERROR;
 
     // Draw all objects (This recursively traverses the object hierarchy.)
-    //CHECKERROR;
-    objectRoot->Draw(lightingProgram, Identity);
-    //CHECKERROR;
+    CHECKERROR;
+    teapot->drawMe = false; // Do not draw the teapot in reflection
+    objectRoot->Draw(reflectionProgram, Identity);
+    CHECKERROR;
 
-    fbo.UnbindTexture(2);
+    // Turn off the shader
+
+    shadowFbo.UnbindTexture(2);
+    reflectionProgram->UnuseShader();
+    reflectionBottomFbo.UnbindFBO();
+
+    ////////////////////////////////////////////////////////////////////////////////
+    // Lighting pass
+    ////////////////////////////////////////////////////////////////////////////////
+
+    // Choose the lighting shader
+    lightingProgram->UseShader();
+    programId = lightingProgram->programId;
+
+    shadowFbo.BindTexture(2, programId, "shadowMap");
+    reflectionTopFbo.BindTexture(3, programId, "reflectionTop");
+    reflectionBottomFbo.BindTexture(4, programId, "reflectionBottom");
+
+    // Set the viewport, and clear the screen
+    glViewport(0, 0, width, height);
+    glClearColor(0.5, 0.5, 0.5, 1.0);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    // @@ The scene specific parameters (uniform variables) used by
+    // the shader are set here.  Object specific parameters are set in
+    // the Draw procedure in object.cpp
+
+    B = Translate(0.5f, 0.5f, 0.5f) * Scale(0.5f, 0.5f, 0.5f);
+    ShadowMatrix = B * ShadowProj * ShadowView;
+
+    // Set Eye
+    eye = glm::vec3(WorldInverse * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+
+    loc = glGetUniformLocation(programId, "Eye");
+	glUniform3fv(loc, 1, &(eye[0]));
+
+    loc = glGetUniformLocation(programId, "ShadowMatrix");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowMatrix));
+    loc = glGetUniformLocation(programId, "WorldProj");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
+    loc = glGetUniformLocation(programId, "WorldView");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldView));
+    loc = glGetUniformLocation(programId, "WorldInverse");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldInverse));
+    loc = glGetUniformLocation(programId, "lightPos");
+    glUniform3fv(loc, 1, &(lightPos[0]));
+    loc = glGetUniformLocation(programId, "Light");
+    glUniform3fv(loc, 1, &(Light[0]));
+    loc = glGetUniformLocation(programId, "Ambient");
+    glUniform3fv(loc, 1, &(Ambient[0]));
+    loc = glGetUniformLocation(programId, "mode");
+    glUniform1i(loc, mode);
+
+    // Draw all objects (This recursively traverses the object hierarchy.)
+    CHECKERROR;
+    teapot->drawMe = true; // Restore drawing of the teapot
+    objectRoot->Draw(lightingProgram, Identity);
+    CHECKERROR;
+
+    shadowFbo.UnbindTexture(2);
+    reflectionTopFbo.UnbindTexture(3);
+    reflectionBottomFbo.UnbindTexture(4);
 
     // Turn off the shader
     lightingProgram->UnuseShader();
