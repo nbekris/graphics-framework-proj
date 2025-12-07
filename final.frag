@@ -8,6 +8,14 @@ out vec4 FragColor;
 vec3 LightingPixel();
 void main()
 {
-	//gl_FragColor.xyz = LightingPixel();
-	FragColor.xyz = LightingPixel();
+    vec3 cIn = LightingPixel();
+    //Exposure Control
+    vec3 exposeControl = 10.0 * cIn; 
+    // Tone Mapping & Gamma
+    float k = 7.0; 
+    vec3 colorSpaceConversion = vec3(k / 2.2);
+
+    vec3 cOut = pow(exposeControl / (exposeControl + vec3(1.0)), colorSpaceConversion);
+
+    FragColor.xyz = cOut;
 }

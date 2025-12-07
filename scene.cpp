@@ -34,6 +34,8 @@ using namespace gl;
 #include "object.h"
 #include "texture.h"
 #include "transform.h"
+#include "HDR.h"
+#include "Texture.h"
 
 const bool fullPolyCount = true; // Use false when emulating the graphics pipeline in software
 
@@ -49,6 +51,8 @@ glm::mat4 ShadowProj;
 FBO shadowFbo;
 FBO reflectionTopFbo;
 FBO reflectionBottomFbo;
+
+HDR* skyIrrMap;
 
 const float grndSize = 100.0;    // Island radius;  Minimum about 20;  Maximum 1000 or so
 const float grndOctaves = 4.0;  // Number of levels of detail to compute
@@ -268,6 +272,9 @@ void Scene::InitializeScene()
     Texture* rightFrameTexture = new Texture("textures/my-house-01.png");
     Texture* skyTexture = new Texture("skys/Ocean.png");
 
+    HDR* skyHDR = new HDR("skys/Road_to_MonumentValley_Ref.hdr");
+    skyIrrMap = new HDR("skys/Road_to_MonumentValley_Ref.irr.hdr"); // is this how you really read it in?
+
     Texture* roomNormal = new Texture("textures/Standard_red_pxr128_normal.png");
     Texture* seaNormal = new Texture("textures/ripples_normalmap.png");
     Texture* podiumNormal = new Texture("textures/Brazilian_rosewood_pxr128_normal.png");
@@ -281,7 +288,7 @@ void Scene::InitializeScene()
     floor      = new Object(FloorPolygons, floorId, floorColor, noSpec, 2, false, floorTexture, floorNormal);
     teapot     = new Object(TeapotPolygons, teapotId, brassColor, brightSpec, 100, true, teapotTexture);
     podium     = new Object(BoxPolygons, boxId, glm::vec3(woodColor), brightSpec, 5, false, podiumTexture, podiumNormal);
-    sky        = new Object(SpherePolygons, skyId, noSpec, noSpec, 0, false, skyTexture);
+    sky        = new Object(SpherePolygons, skyId, noSpec, noSpec, 0, false, skyHDR);
     ground     = new Object(GroundPolygons, groundId, grassColor, noSpec, 3, false, groundTexture);
     sea        = new Object(SeaPolygons, seaId, waterColor, brightSpec, 100, false, skyTexture, seaNormal);
     leftFrame  = FramedPicture(Identity, lPicId, BoxPolygons, QuadPolygons);
@@ -301,7 +308,7 @@ void Scene::InitializeScene()
 
     // Scene is composed of sky, ground, sea, room and some central models
     if (fullPolyCount) {
-        objectRoot->add(sky, Scale(2000.0, 2000.0, 2000.0));
+        objectRoot->add(sky, Scale(2000.0, 2000.0, 2000.0)); //check scale, but this probably fine
         objectRoot->add(sea); 
         objectRoot->add(ground); }
     objectRoot->add(central);
@@ -532,6 +539,8 @@ void Scene::CreateShader()
 	programId = reflectionProgram->programId;
 
     shadowFbo.BindTexture(2, programId, "shadowMap");
+    sky->texture->BindTexture(5, programId, "skyboxMap");
+	skyIrrMap->BindTexture(6, programId, "irradianceMap");
 
 	reflectionTopFbo.BindFBO();
 
@@ -571,6 +580,9 @@ void Scene::CreateShader()
     teapot->drawMe = false; // Do not draw the teapot in reflection
     objectRoot->Draw(reflectionProgram, Identity);
     CHECKERROR;
+
+    sky->texture->UnbindTexture(5);
+    skyIrrMap->UnbindTexture(6);
 
     // Turn off the shader
     reflectionProgram->UnuseShader();
@@ -637,6 +649,9 @@ void Scene::CreateShader()
     reflectionTopFbo.BindTexture(3, programId, "reflectionTop");
     reflectionBottomFbo.BindTexture(4, programId, "reflectionBottom");
 
+    sky->texture->BindTexture(5, programId, "skyboxMap");
+    skyIrrMap->BindTexture(6, programId, "irradianceMap");
+
     // Set the viewport, and clear the screen
     glViewport(0, 0, width, height);
     glClearColor(0.5, 0.5, 0.5, 1.0);
@@ -681,6 +696,8 @@ void Scene::CreateShader()
     shadowFbo.UnbindTexture(2);
     reflectionTopFbo.UnbindTexture(3);
     reflectionBottomFbo.UnbindTexture(4);
+    sky->texture->UnbindTexture(5);
+    skyIrrMap->UnbindTexture(6);
 
     // Turn off the shader
     lightingProgram->UnuseShader();

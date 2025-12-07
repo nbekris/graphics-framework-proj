@@ -4,6 +4,7 @@
 // to a shader for use, and unbind when done.
 ////////////////////////////////////////////////////////////////////////
 
+#include <stdlib.h>
 #ifndef _TEXTURE_
 #define _TEXTURE_
 

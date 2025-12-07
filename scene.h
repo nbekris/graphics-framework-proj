@@ -87,7 +87,6 @@ public:
     ShaderProgram* shadowProgram;
 	ShaderProgram* reflectionProgram;
 
-
     // Options menu stuff
     bool show_demo_window;
 

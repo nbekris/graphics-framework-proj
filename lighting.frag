@@ -31,6 +31,8 @@ uniform sampler2D normalTex;
 uniform sampler2D shadowMap;
 uniform sampler2D reflectionTop;
 uniform sampler2D reflectionBottom;
+uniform sampler2D irradianceMap;
+uniform sampler2D skyboxMap;
 uniform bool hasNormal;
 uniform bool hasTexture;
 uniform float currentTime;
@@ -100,9 +102,9 @@ bool PixelInShadow()
 
 vec3 LightingPixel()
 {
-	//vec2 testUv = gl_FragCoord.xy/vec2(750,750); // (or whatever screen size)
-	//FragColor.xyz = vec3(texture(reflectionTop, uv).w/100.0); // or similar]
-	//return texture(reflectionTop, testUv).xyz;
+//	vec2 testUv = gl_FragCoord.xy/vec2(750,750); // (or whatever screen size)
+//	//FragColor.xyz = vec3(texture(reflectionTop, uv).w/100.0); // or similar]
+//	return texture(irradianceMap, testUv).xyz * 20;
 
 	vec3 delta;
 	vec3 Kd;
@@ -114,7 +116,6 @@ vec3 LightingPixel()
 	float roughness = sqrt(2 / (shininess + 2)); //conversion from phong to GGX
 
 	vec2 uv = texCoord;
-	vec2 uvNormal = texCoord;
 
 	vec3 T = normalize(tanVec);
 	vec3 B = normalize(cross(T, N));
@@ -154,6 +155,7 @@ vec3 LightingPixel()
 	float HN = max(dot(H, N), 0.0);
 	float VN = max(dot(V, N), 0.0);
 	float LH = max(dot(L, H), 0.0);
+	float HV = max(dot(H,V), 0.0);
 
 	if (objectId==seaId)
 	{
@@ -212,23 +214,44 @@ vec3 LightingPixel()
     
 	if(objectId != skyId)
 	{
-		vec3 F = SchlickFresnel(LH, specular);
+//		vec3 F = SchlickFresnel(LH, specular);
+//		float D = DistributionGGX(HN, roughness);
+//		float G = SmithMethod(VN, LN, roughness);
+//		vec3 Fs = (F * G * D) / max(4.0 * LN * VN, 0.001);
+//	
+
+
+		// IBL Calculation ------------------------
+
+		// Diffuse IBL
+		VN = max(dot(V, N), 0.0);
+		vec3 R = 2.0 * VN * N - V;
+		float RN = max(dot(R, N), 0.0);
+		vec3 Fd = Kd / PI;
+
+		vec2 irradianceN = vec2(-atan(R.y, R.x) / (2 * PI), acos(R.z) / PI);
+		vec3 irrCalc = texture(irradianceMap, irradianceN).xyz * 50;
+		vec3 diffuseFinal = Fd * irrCalc;
+
+		// Specular IBL
+		vec3 skydomeCalc = texture(skyboxMap, R.xy).xyz;
+		vec3 specularCalc = skydomeCalc * max(dot(N, R), 0.0);
+
 		float D = DistributionGGX(HN, roughness);
 		float G = SmithMethod(VN, LN, roughness);
-		vec3 Fs = (F * G * D) / max(4.0 * LN * VN, 0.001);
-	
-		vec3 Fd = Kd / PI;
+		vec3 F = SchlickFresnel(HV, specular);
+		vec3 Fs = (F * G * D) / max(4.0 * RN * VN, 0.001);
+
 		vec3 totalBRDF = Fd + Fs;
 		vec3 directLight = totalBRDF * Light * LN;
 		vec3 ambient = Ambient * Kd;
+
+		vec3 specularFinal = specular * Fs;
 
 		// Reflection Calculation ------------------------
 
 		if (reflective)
 		{
-			VN = max(dot(V, N), 0.0);
-			vec3 R = 2.0 * VN * N - V;
-
 			float distR = length(R);
 			vec3 normalR = normalize(R);
 			float a = normalR.x;
@@ -256,10 +279,13 @@ vec3 LightingPixel()
 
 		if (PixelInShadow()) 
 		{
-			return ambient;
+			//return ambient;
+			return diffuseFinal + specularFinal;
 		}
 
-		return directLight + ambient;
+		return directLight + (diffuseFinal + specularFinal);
+		//return directLight + ambient;
+		//return diffuseFinal + specularFinal;
 	}
 	else
 	{

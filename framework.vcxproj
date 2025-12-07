@@ -113,6 +113,7 @@
   <ItemGroup>
     <ClCompile Include="fbo.cpp" />
     <ClCompile Include="framework.cpp" />
+    <ClCompile Include="HDR.cpp" />
     <ClCompile Include="libs\imgui-master\backends\imgui_impl_glfw.cpp" />
     <ClCompile Include="libs\imgui-master\backends\imgui_impl_opengl3.cpp" />
     <ClCompile Include="libs\imgui-master\imgui.cpp" />
@@ -137,6 +138,7 @@
     <ClInclude Include="emulator.h" />
     <ClInclude Include="fbo.h" />
     <ClInclude Include="framework.h" />
+    <ClInclude Include="HDR.h" />
     <ClInclude Include="interact.h" />
     <ClInclude Include="object.h" />
     <ClInclude Include="rply.h" />
