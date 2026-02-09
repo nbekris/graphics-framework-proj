@@ -78,6 +78,9 @@ public:
     Object *central, *anim, *room, *floor, *teapot, *podium, *sky,
             *ground, *sea, *spheres, *leftFrame, *rightFrame;
 
+	Shape* QuadPolygons;
+    Object* fullScreenQuad;
+
     std::vector<Object*> animated;
     ProceduralGround* proceduralground;
 
@@ -86,6 +89,8 @@ public:
     // @@ Declare additional shaders if necessary
     ShaderProgram* shadowProgram;
 	ShaderProgram* reflectionProgram;
+	ShaderProgram* gBufferProgram;
+    ShaderProgram* deferredLightProgram;
 
     // Options menu stuff
     bool show_demo_window;

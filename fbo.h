@@ -12,17 +12,29 @@ public:
     unsigned int textureID;
     int width, height;  // Size of the texture.
 
+    // --- G-Buffer specific textures ---
+    unsigned int gPosition;
+    unsigned int gNormal;
+    unsigned int gAlbedoSpec;
+    unsigned int depthBuffer;
+
     void CreateFBO(const int w, const int h);
-    
     // Bind this FBO to receive the output of the graphics pipeline.
     void BindFBO();
-    
     // Unbind this FBO from the graphics pipeline;  graphics goes to screen by default.
     void UnbindFBO();
-
     // Bind this FBO's texture to a texture unit.
     void BindTexture(const int unit, const int programId, const std::string& name);
-
     // Unbind this FBO's texture from a texture unit.
     void UnbindTexture(const int unit);
+
+    // --- G-Buffer methods ---
+    void CreateGBuffer(const int w, const int h);
+
+    // Helper to bind all 3 textures at once for the lighting pass
+    void BindGBufferTextures(int startUnit, int programId,
+        std::string posName, std::string normName, std::string albedoName);
+
+    // Helper to unbind all 3 textures
+    void UnbindGBufferTextures(int startUnit);
 };

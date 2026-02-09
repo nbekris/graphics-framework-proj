@@ -51,6 +51,7 @@ glm::mat4 ShadowProj;
 FBO shadowFbo;
 FBO reflectionTopFbo;
 FBO reflectionBottomFbo;
+FBO gBufferFbo;
 
 HDR* skyIrrMap;
 
@@ -184,48 +185,71 @@ void Scene::InitializeScene()
     CHECKERROR;
     objectRoot = new Object(NULL, nullId);
 
+	QuadPolygons = new Quad();
+    fullScreenQuad = new Object(QuadPolygons, nullId,
+        glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), 0, false,
+        NULL,
+        NULL);
+
     shadowFbo.CreateFBO(1000, 1000);
 	reflectionTopFbo.CreateFBO(1024, 1024);
 	reflectionBottomFbo.CreateFBO(1024, 1024);
+	gBufferFbo.CreateGBuffer(800, 800);
     
+	// Create Deferred Rendering shader program
+    gBufferProgram = new ShaderProgram();
+	gBufferProgram->AddShader("gBuffer.vert", GL_VERTEX_SHADER);
+	gBufferProgram->AddShader("gBuffer.frag", GL_FRAGMENT_SHADER);
+	glBindAttribLocation(gBufferProgram->programId, 0, "vertex");
+	glBindAttribLocation(gBufferProgram->programId, 1, "vertexNormal");
+	glBindAttribLocation(gBufferProgram->programId, 2, "vertexTexture");
+	gBufferProgram->LinkProgram();
+
+	deferredLightProgram = new ShaderProgram();
+	deferredLightProgram->AddShader("deferredLight.vert", GL_VERTEX_SHADER);
+	deferredLightProgram->AddShader("deferredLight.frag", GL_FRAGMENT_SHADER);
+	glBindAttribLocation(deferredLightProgram->programId, 0, "vertex");
+	glBindAttribLocation(deferredLightProgram->programId, 2, "vertexTexture");
+	deferredLightProgram->LinkProgram();
+
     // Enable OpenGL depth-testing
     glEnable(GL_DEPTH_TEST);
 
     // Create the lighting shader program from source code files.
     // @@ Initialize additional shaders if necessary
-    lightingProgram = new ShaderProgram();
-    lightingProgram->AddShader("final.vert", GL_VERTEX_SHADER);
-    lightingProgram->AddShader("final.frag", GL_FRAGMENT_SHADER);
-    lightingProgram->AddShader("lighting.vert", GL_VERTEX_SHADER);
-    lightingProgram->AddShader("lighting.frag", GL_FRAGMENT_SHADER);
+ //   lightingProgram = new ShaderProgram();
+ //   lightingProgram->AddShader("final.vert", GL_VERTEX_SHADER);
+ //   lightingProgram->AddShader("final.frag", GL_FRAGMENT_SHADER);
+ //   lightingProgram->AddShader("lighting.vert", GL_VERTEX_SHADER);
+ //   lightingProgram->AddShader("lighting.frag", GL_FRAGMENT_SHADER);
 
-    shadowProgram = new ShaderProgram();
-    shadowProgram->AddShader("shadow.frag", GL_FRAGMENT_SHADER);
-    shadowProgram->AddShader("shadow.vert", GL_VERTEX_SHADER);
+ //   shadowProgram = new ShaderProgram();
+ //   shadowProgram->AddShader("shadow.frag", GL_FRAGMENT_SHADER);
+ //   shadowProgram->AddShader("shadow.vert", GL_VERTEX_SHADER);
 
-	reflectionProgram = new ShaderProgram();
-	reflectionProgram->AddShader("reflection.frag", GL_FRAGMENT_SHADER);
-	reflectionProgram->AddShader("reflection.vert", GL_VERTEX_SHADER);
-    reflectionProgram->AddShader("lighting.vert", GL_VERTEX_SHADER);
-    reflectionProgram->AddShader("lighting.frag", GL_FRAGMENT_SHADER);
+	//reflectionProgram = new ShaderProgram();
+	//reflectionProgram->AddShader("reflection.frag", GL_FRAGMENT_SHADER);
+	//reflectionProgram->AddShader("reflection.vert", GL_VERTEX_SHADER);
+ //   reflectionProgram->AddShader("lighting.vert", GL_VERTEX_SHADER);
+ //   reflectionProgram->AddShader("lighting.frag", GL_FRAGMENT_SHADER);
 
-    glBindAttribLocation(lightingProgram->programId, 0, "vertex");
-    glBindAttribLocation(lightingProgram->programId, 1, "vertexNormal");
-    glBindAttribLocation(lightingProgram->programId, 2, "vertexTexture");
-    glBindAttribLocation(lightingProgram->programId, 3, "vertexTangent");
-    lightingProgram->LinkProgram();
+ //   glBindAttribLocation(lightingProgram->programId, 0, "vertex");
+ //   glBindAttribLocation(lightingProgram->programId, 1, "vertexNormal");
+ //   glBindAttribLocation(lightingProgram->programId, 2, "vertexTexture");
+ //   glBindAttribLocation(lightingProgram->programId, 3, "vertexTangent");
+ //   lightingProgram->LinkProgram();
 
-    glBindAttribLocation(shadowProgram->programId, 0, "vertex");
-    glBindAttribLocation(shadowProgram->programId, 1, "vertexNormal");
-    glBindAttribLocation(shadowProgram->programId, 2, "vertexTexture");
-    glBindAttribLocation(shadowProgram->programId, 3, "vertexTangent");
-    shadowProgram->LinkProgram();
+ //   glBindAttribLocation(shadowProgram->programId, 0, "vertex");
+ //   glBindAttribLocation(shadowProgram->programId, 1, "vertexNormal");
+ //   glBindAttribLocation(shadowProgram->programId, 2, "vertexTexture");
+ //   glBindAttribLocation(shadowProgram->programId, 3, "vertexTangent");
+ //   shadowProgram->LinkProgram();
 
-    glBindAttribLocation(reflectionProgram->programId, 0, "vertex");
-    glBindAttribLocation(reflectionProgram->programId, 1, "vertexNormal");
-    glBindAttribLocation(reflectionProgram->programId, 2, "vertexTexture");
-    glBindAttribLocation(reflectionProgram->programId, 3, "vertexTangent");
-    reflectionProgram->LinkProgram();
+ //   glBindAttribLocation(reflectionProgram->programId, 0, "vertex");
+ //   glBindAttribLocation(reflectionProgram->programId, 1, "vertexNormal");
+ //   glBindAttribLocation(reflectionProgram->programId, 2, "vertexTexture");
+ //   glBindAttribLocation(reflectionProgram->programId, 3, "vertexTangent");
+ //   reflectionProgram->LinkProgram();
 
 
     
@@ -470,9 +494,7 @@ void Scene::DrawScene()
     // The lighting algorithm needs the inverse of the WorldView matrix
     WorldInverse = glm::inverse(WorldView);
 
-
     CreateShader();
-
 }
 
 void Scene::CreateShader()
@@ -492,217 +514,341 @@ void Scene::CreateShader()
     CHECKERROR;
     int loc, programId;
 
-    ////////////////////////////////////////////////////////////////////////////////
-    // Shadow pass
-    ////////////////////////////////////////////////////////////////////////////////
+    // -----------------------------------------------------------------
+    // PASS 1: G Buffer Pass
+    // Render all scene objects into the G-Buffer textures
+    // -----------------------------------------------------------------
 
-    shadowProgram->UseShader();
-    programId = shadowProgram->programId;
+    gBufferFbo.BindFBO();
 
-    shadowFbo.BindFBO();
-
-    ShadowView = LookAt(lightPos, glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-    ShadowProj = Perspective(40 / lightDist, 40 / lightDist, front, back);
-
-    // Set the viewport, and clear the screen
-    glViewport(0, 0, 1000, 1000); //set variable
-    glClearColor(0.5, 0.5, 0.5, 1.0);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    // Set Light
-    glm::vec3 Light(3, 3, 3);
-    glm::vec3 Ambient(0.4, 0.4, 0.4);
-
-    loc = glGetUniformLocation(programId, "ProjectionMatrix");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowProj));
-    loc = glGetUniformLocation(programId, "ViewMatrix");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowView));
-
-    // Draw all objects (This recursively traverses the object hierarchy.)
-    CHECKERROR;
-    objectRoot->Draw(shadowProgram, Identity);
-    CHECKERROR;
-
-    // Turn off the shader
-    shadowFbo.UnbindFBO();
-    shadowProgram->UnuseShader();
-
-    ////////////////////////////////////////////////////////////////////////////////
-    // End of Shadow pass
-    ////////////////////////////////////////////////////////////////////////////////
-
-    ////////////////////////////////////////////////////////////////////////////////
-    // Reflection pass
-    ////////////////////////////////////////////////////////////////////////////////
-
-	reflectionProgram->UseShader();
-	programId = reflectionProgram->programId;
-
-    shadowFbo.BindTexture(2, programId, "shadowMap");
-    sky->texture->BindTexture(5, programId, "skyboxMap");
-	skyIrrMap->BindTexture(6, programId, "irradianceMap");
-
-	reflectionTopFbo.BindFBO();
-
-    // Set the viewport, and clear the screen
-    glViewport(0, 0, reflectionTopFbo.width, reflectionTopFbo.height);
-    glClearColor(1.0, 0.0, 1.0, 1.0);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    glm::mat4 B = Translate(0.5f, 0.5f, 0.5f) * Scale(0.5f, 0.5f, 0.5f);
-    ShadowMatrix = B * ShadowProj * ShadowView;
-
-    glm::vec3 eye = glm::vec3(0.0f, 0.0f, 1.5f);
-	float reflectDir = 1.0f;  
-
-    loc = glGetUniformLocation(programId, "Eye");
-    glUniform3fv(loc, 1, &(eye[0]));
-    loc = glGetUniformLocation(programId, "ReflectDir");
-    glUniform1fv(loc, 1, &reflectDir);
-
-    loc = glGetUniformLocation(programId, "ShadowMatrix");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowMatrix));
-    loc = glGetUniformLocation(programId, "WorldProj");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
-    loc = glGetUniformLocation(programId, "WorldInverse");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldInverse));
-    loc = glGetUniformLocation(programId, "lightPos");
-    glUniform3fv(loc, 1, &(lightPos[0]));
-    loc = glGetUniformLocation(programId, "Light");
-    glUniform3fv(loc, 1, &(Light[0]));
-    loc = glGetUniformLocation(programId, "Ambient");
-    glUniform3fv(loc, 1, &(Ambient[0]));
-    loc = glGetUniformLocation(programId, "mode");
-    glUniform1i(loc, mode);
-
-    // Draw all objects (This recursively traverses the object hierarchy.)
-    CHECKERROR;
-    teapot->drawMe = false; // Do not draw the teapot in reflection
-    objectRoot->Draw(reflectionProgram, Identity);
-    CHECKERROR;
-
-    sky->texture->UnbindTexture(5);
-    skyIrrMap->UnbindTexture(6);
-
-    // Turn off the shader
-    reflectionProgram->UnuseShader();
-    reflectionTopFbo.UnbindFBO();
-
-    //////////////////////////
-    // Bottom Reflection pass
-    //////////////////////////
-
-    reflectionProgram->UseShader();
-
-    reflectionBottomFbo.BindFBO();
-
-    // Set the viewport, and clear the screen
-    glViewport(0, 0, reflectionBottomFbo.width, reflectionBottomFbo.height);
-    glClearColor(0.5, 0.5, 0.5, 1.0);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    reflectDir = -1.0f;
-
-    loc = glGetUniformLocation(programId, "Eye");
-    glUniform3fv(loc, 1, &(eye[0]));
-    loc = glGetUniformLocation(programId, "ReflectDir");
-    glUniform1fv(loc, 1, &reflectDir);
-
-    loc = glGetUniformLocation(programId, "ShadowMatrix");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowMatrix));
-    loc = glGetUniformLocation(programId, "WorldProj");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
-    loc = glGetUniformLocation(programId, "WorldView");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldView));
-    loc = glGetUniformLocation(programId, "WorldInverse");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldInverse));
-    loc = glGetUniformLocation(programId, "lightPos");
-    glUniform3fv(loc, 1, &(lightPos[0]));
-    loc = glGetUniformLocation(programId, "Light");
-    glUniform3fv(loc, 1, &(Light[0]));
-    loc = glGetUniformLocation(programId, "Ambient");
-    glUniform3fv(loc, 1, &(Ambient[0]));
-    loc = glGetUniformLocation(programId, "mode");
-    glUniform1i(loc, mode);
-
-    // Draw all objects (This recursively traverses the object hierarchy.)
-    CHECKERROR;
-    teapot->drawMe = false; // Do not draw the teapot in reflection
-    objectRoot->Draw(reflectionProgram, Identity);
-    CHECKERROR;
-
-    // Turn off the shader
-
-    shadowFbo.UnbindTexture(2);
-    reflectionProgram->UnuseShader();
-    reflectionBottomFbo.UnbindFBO();
-
-    ////////////////////////////////////////////////////////////////////////////////
-    // Lighting pass
-    ////////////////////////////////////////////////////////////////////////////////
-
-    // Choose the lighting shader
-    lightingProgram->UseShader();
-    programId = lightingProgram->programId;
-
-    shadowFbo.BindTexture(2, programId, "shadowMap");
-    reflectionTopFbo.BindTexture(3, programId, "reflectionTop");
-    reflectionBottomFbo.BindTexture(4, programId, "reflectionBottom");
-
-    sky->texture->BindTexture(5, programId, "skyboxMap");
-    skyIrrMap->BindTexture(6, programId, "irradianceMap");
-
-    // Set the viewport, and clear the screen
+    // Clear Color and Depth of the G-Buffer
+    // We clear to black (0,0,0) so empty space has no position/normal data
     glViewport(0, 0, width, height);
     glClearColor(0.5, 0.5, 0.5, 1.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    // @@ The scene specific parameters (uniform variables) used by
-    // the shader are set here.  Object specific parameters are set in
-    // the Draw procedure in object.cpp
+    gBufferProgram->UseShader();
 
-    B = Translate(0.5f, 0.5f, 0.5f) * Scale(0.5f, 0.5f, 0.5f);
-    ShadowMatrix = B * ShadowProj * ShadowView;
-
-    // Set Eye
-    eye = glm::vec3(WorldInverse * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
-
-    loc = glGetUniformLocation(programId, "Eye");
-	glUniform3fv(loc, 1, &(eye[0]));
-
-    loc = glGetUniformLocation(programId, "ShadowMatrix");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowMatrix));
-    loc = glGetUniformLocation(programId, "WorldProj");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
-    loc = glGetUniformLocation(programId, "WorldView");
+    // Set View/Projection Matrices (Used by all objects)
+    loc = glGetUniformLocation(gBufferProgram->programId, "WorldView");
     glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldView));
-    loc = glGetUniformLocation(programId, "WorldInverse");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldInverse));
-    loc = glGetUniformLocation(programId, "lightPos");
-    glUniform3fv(loc, 1, &(lightPos[0]));
-    loc = glGetUniformLocation(programId, "Light");
-    glUniform3fv(loc, 1, &(Light[0]));
-    loc = glGetUniformLocation(programId, "Ambient");
-    glUniform3fv(loc, 1, &(Ambient[0]));
-    loc = glGetUniformLocation(programId, "mode");
-    glUniform1i(loc, mode);
 
-    // Draw all objects (This recursively traverses the object hierarchy.)
-    CHECKERROR;
-    teapot->drawMe = true; // Restore drawing of the teapot
-    objectRoot->Draw(lightingProgram, Identity);
-    CHECKERROR;
+    loc = glGetUniformLocation(gBufferProgram->programId, "WorldProj");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
 
-    shadowFbo.UnbindTexture(2);
-    reflectionTopFbo.UnbindTexture(3);
-    reflectionBottomFbo.UnbindTexture(4);
-    sky->texture->UnbindTexture(5);
-    skyIrrMap->UnbindTexture(6);
+    // Draw the entire scene hierarchy
+    // Note: The 'Draw' method in your Object class sets the Model matrix
+    objectRoot->Draw(gBufferProgram, Identity);
 
-    // Turn off the shader
-    lightingProgram->UnuseShader();
+    gBufferProgram->UnuseShader();
+    gBufferFbo.UnbindFBO();
 
-    ////////////////////////////////////////////////////////////////////////////////
-    // End of Lighting pass
-    ////////////////////////////////////////////////////////////////////////////////
+
+    // -----------------------------------------------------------------
+    // PASS 2: Lighting Pass
+    // Render a full-screen quad and calculate lighting per-pixel
+    // -----------------------------------------------------------------
+
+    bool showDebug = true;
+
+    // Revert to default framebuffer (the screen)
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // Clear the screen (optional, but good practice)
+    glViewport(0, 0, width, height);
+    glClearColor(0.0, 0.0, 0.0, 1.0);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    deferredLightProgram->UseShader();
+
+    // 2. Bind G-Buffer (We only need to do this ONCE for all lights)
+    gBufferFbo.BindGBufferTextures(0, deferredLightProgram->programId,
+        "gPosition", "gNormal", "gAlbedoSpec");
+
+    // 3. Enable Additive Blending
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE); // Source + Destination
+    glDepthMask(GL_FALSE); // Stop writing to depth buffer (optional but good practice)
+    glDisable(GL_DEPTH_TEST); // We don't need depth testing for a full screen quad
+
+    if (showDebug)
+    {
+        // -------------------------------------------------
+        // DEBUG MODE: Draw 4 Quadrants
+        // -------------------------------------------------
+
+        int w = width; // current window width
+        int h = height; // current window height
+        int loc = glGetUniformLocation(deferredLightProgram->programId, "viewMode");
+
+        // Top Left: Position (Mode 1)
+        glViewport(0, h / 2, w / 2, h / 2);
+        glUniform1i(loc, 1);
+        fullScreenQuad->Draw(deferredLightProgram, Identity);
+
+        // Top Right: Normal (Mode 2)
+        glViewport(w / 2, h / 2, w / 2, h / 2);
+        glUniform1i(loc, 2);
+        fullScreenQuad->Draw(deferredLightProgram, Identity);
+
+        // Bottom Left: Albedo (Mode 3)
+        glViewport(0, 0, w / 2, h / 2);
+        glUniform1i(loc, 3);
+        fullScreenQuad->Draw(deferredLightProgram, Identity);
+
+        // Bottom Right: Final Lighting (Mode 0)
+        glViewport(w / 2, 0, w / 2, h / 2);
+
+        // Set Mode to 0 (Lighting)
+        glUniform1i(loc, 0);
+
+        // Set Light Position
+        int lightLoc = glGetUniformLocation(deferredLightProgram->programId, "lightPos");
+        glUniform3fv(lightLoc, 1, &lightPos[0]); // Ensure this variable exists in your class!
+
+        // Set Light Color
+        glm::vec3 debugLightColor(1.0, 1.0, 1.0); // Bright White
+        int colorLoc = glGetUniformLocation(deferredLightProgram->programId, "lightColor");
+        glUniform3fv(colorLoc, 1, &debugLightColor[0]);
+
+        // Set View Position (Needed for Specular)
+        int viewLoc = glGetUniformLocation(deferredLightProgram->programId, "viewPos");
+        glUniform3fv(viewLoc, 1, &eye[0]);
+
+        fullScreenQuad->Draw(deferredLightProgram, Identity);
+
+        // RESTORE VIEWPORT (Very Important!)
+        glViewport(0, 0, w, h);
+    }
+    else
+    {
+        // -------------------------------------------------
+        // STANDARD MODE: Full Screen Lighting Loop
+        // -------------------------------------------------
+        glViewport(0, 0, width, height);
+        int loc = glGetUniformLocation(deferredLightProgram->programId, "viewMode");
+        glUniform1i(loc, 0); // Force Mode 0 (Lighting)
+    }
+
+    // 5. Clean Up
+    glDisable(GL_BLEND);      // Turn off blending so UI/Debug draws correctly
+    glDepthMask(GL_TRUE);     // Re-enable depth writing
+    glEnable(GL_DEPTH_TEST);  // Re-enable depth testing
+
+    gBufferFbo.UnbindGBufferTextures(0);
+    deferredLightProgram->UnuseShader();
+
+ //   ////////////////////////////////////////////////////////////////////////////////
+ //   // Shadow pass
+ //   ////////////////////////////////////////////////////////////////////////////////
+
+ //   shadowProgram->UseShader();
+ //   programId = shadowProgram->programId;
+
+ //   shadowFbo.BindFBO();
+
+ //   ShadowView = LookAt(lightPos, glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+ //   ShadowProj = Perspective(40 / lightDist, 40 / lightDist, front, back);
+
+ //   // Set the viewport, and clear the screen
+ //   glViewport(0, 0, 1000, 1000); //set variable
+ //   glClearColor(0.5, 0.5, 0.5, 1.0);
+ //   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+ //   // Set Light
+ //   glm::vec3 Light(3, 3, 3);
+ //   glm::vec3 Ambient(0.4, 0.4, 0.4);
+
+ //   loc = glGetUniformLocation(programId, "ProjectionMatrix");
+ //   glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowProj));
+ //   loc = glGetUniformLocation(programId, "ViewMatrix");
+ //   glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowView));
+
+ //   // Draw all objects (This recursively traverses the object hierarchy.)
+ //   CHECKERROR;
+ //   objectRoot->Draw(shadowProgram, Identity);
+ //   CHECKERROR;
+
+ //   // Turn off the shader
+ //   shadowFbo.UnbindFBO();
+ //   shadowProgram->UnuseShader();
+
+ //   ////////////////////////////////////////////////////////////////////////////////
+ //   // End of Shadow pass
+ //   ////////////////////////////////////////////////////////////////////////////////
+
+ //   ////////////////////////////////////////////////////////////////////////////////
+ //   // Reflection pass
+ //   ////////////////////////////////////////////////////////////////////////////////
+
+	//reflectionProgram->UseShader();
+	//programId = reflectionProgram->programId;
+
+ //   shadowFbo.BindTexture(2, programId, "shadowMap");
+ //   sky->texture->BindTexture(5, programId, "skyboxMap");
+	//skyIrrMap->BindTexture(6, programId, "irradianceMap");
+
+	//reflectionTopFbo.BindFBO();
+
+ //   // Set the viewport, and clear the screen
+ //   glViewport(0, 0, reflectionTopFbo.width, reflectionTopFbo.height);
+ //   glClearColor(1.0, 0.0, 1.0, 1.0);
+ //   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+ //   glm::mat4 B = Translate(0.5f, 0.5f, 0.5f) * Scale(0.5f, 0.5f, 0.5f);
+ //   ShadowMatrix = B * ShadowProj * ShadowView;
+
+ //   glm::vec3 eye = glm::vec3(0.0f, 0.0f, 1.5f);
+	//float reflectDir = 1.0f;  
+
+ //   loc = glGetUniformLocation(programId, "Eye");
+ //   glUniform3fv(loc, 1, &(eye[0]));
+ //   loc = glGetUniformLocation(programId, "ReflectDir");
+ //   glUniform1fv(loc, 1, &reflectDir);
+
+ //   loc = glGetUniformLocation(programId, "ShadowMatrix");
+ //   glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowMatrix));
+ //   loc = glGetUniformLocation(programId, "WorldProj");
+ //   glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
+ //   loc = glGetUniformLocation(programId, "WorldInverse");
+ //   glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldInverse));
+ //   loc = glGetUniformLocation(programId, "lightPos");
+ //   glUniform3fv(loc, 1, &(lightPos[0]));
+ //   loc = glGetUniformLocation(programId, "Light");
+ //   glUniform3fv(loc, 1, &(Light[0]));
+ //   loc = glGetUniformLocation(programId, "Ambient");
+ //   glUniform3fv(loc, 1, &(Ambient[0]));
+ //   loc = glGetUniformLocation(programId, "mode");
+ //   glUniform1i(loc, mode);
+
+ //   // Draw all objects (This recursively traverses the object hierarchy.)
+ //   CHECKERROR;
+ //   teapot->drawMe = false; // Do not draw the teapot in reflection
+ //   objectRoot->Draw(reflectionProgram, Identity);
+ //   CHECKERROR;
+
+ //   sky->texture->UnbindTexture(5);
+ //   skyIrrMap->UnbindTexture(6);
+
+ //   // Turn off the shader
+ //   reflectionProgram->UnuseShader();
+ //   reflectionTopFbo.UnbindFBO();
+
+ //   //////////////////////////
+ //   // Bottom Reflection pass
+ //   //////////////////////////
+
+ //   reflectionProgram->UseShader();
+
+ //   reflectionBottomFbo.BindFBO();
+
+ //   // Set the viewport, and clear the screen
+ //   glViewport(0, 0, reflectionBottomFbo.width, reflectionBottomFbo.height);
+ //   glClearColor(0.5, 0.5, 0.5, 1.0);
+ //   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+ //   reflectDir = -1.0f;
+
+ //   loc = glGetUniformLocation(programId, "Eye");
+ //   glUniform3fv(loc, 1, &(eye[0]));
+ //   loc = glGetUniformLocation(programId, "ReflectDir");
+ //   glUniform1fv(loc, 1, &reflectDir);
+
+ //   loc = glGetUniformLocation(programId, "ShadowMatrix");
+ //   glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowMatrix));
+ //   loc = glGetUniformLocation(programId, "WorldProj");
+ //   glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
+ //   loc = glGetUniformLocation(programId, "WorldView");
+ //   glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldView));
+ //   loc = glGetUniformLocation(programId, "WorldInverse");
+ //   glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldInverse));
+ //   loc = glGetUniformLocation(programId, "lightPos");
+ //   glUniform3fv(loc, 1, &(lightPos[0]));
+ //   loc = glGetUniformLocation(programId, "Light");
+ //   glUniform3fv(loc, 1, &(Light[0]));
+ //   loc = glGetUniformLocation(programId, "Ambient");
+ //   glUniform3fv(loc, 1, &(Ambient[0]));
+ //   loc = glGetUniformLocation(programId, "mode");
+ //   glUniform1i(loc, mode);
+
+ //   // Draw all objects (This recursively traverses the object hierarchy.)
+ //   CHECKERROR;
+ //   teapot->drawMe = false; // Do not draw the teapot in reflection
+ //   objectRoot->Draw(reflectionProgram, Identity);
+ //   CHECKERROR;
+
+ //   // Turn off the shader
+
+ //   shadowFbo.UnbindTexture(2);
+ //   reflectionProgram->UnuseShader();
+ //   reflectionBottomFbo.UnbindFBO();
+
+ //   ////////////////////////////////////////////////////////////////////////////////
+ //   // Lighting pass
+ //   ////////////////////////////////////////////////////////////////////////////////
+
+ //   // Choose the lighting shader
+ //   lightingProgram->UseShader();
+ //   programId = lightingProgram->programId;
+
+ //   shadowFbo.BindTexture(2, programId, "shadowMap");
+ //   reflectionTopFbo.BindTexture(3, programId, "reflectionTop");
+ //   reflectionBottomFbo.BindTexture(4, programId, "reflectionBottom");
+
+ //   sky->texture->BindTexture(5, programId, "skyboxMap");
+ //   skyIrrMap->BindTexture(6, programId, "irradianceMap");
+
+ //   // Set the viewport, and clear the screen
+ //   glViewport(0, 0, width, height);
+ //   glClearColor(0.5, 0.5, 0.5, 1.0);
+ //   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+ //   // @@ The scene specific parameters (uniform variables) used by
+ //   // the shader are set here.  Object specific parameters are set in
+ //   // the Draw procedure in object.cpp
+
+ //   B = Translate(0.5f, 0.5f, 0.5f) * Scale(0.5f, 0.5f, 0.5f);
+ //   ShadowMatrix = B * ShadowProj * ShadowView;
+
+ //   // Set Eye
+ //   eye = glm::vec3(WorldInverse * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+
+ //   loc = glGetUniformLocation(programId, "Eye");
+	//glUniform3fv(loc, 1, &(eye[0]));
+
+ //   loc = glGetUniformLocation(programId, "ShadowMatrix");
+ //   glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowMatrix));
+ //   loc = glGetUniformLocation(programId, "WorldProj");
+ //   glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
+ //   loc = glGetUniformLocation(programId, "WorldView");
+ //   glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldView));
+ //   loc = glGetUniformLocation(programId, "WorldInverse");
+ //   glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldInverse));
+ //   loc = glGetUniformLocation(programId, "lightPos");
+ //   glUniform3fv(loc, 1, &(lightPos[0]));
+ //   loc = glGetUniformLocation(programId, "Light");
+ //   glUniform3fv(loc, 1, &(Light[0]));
+ //   loc = glGetUniformLocation(programId, "Ambient");
+ //   glUniform3fv(loc, 1, &(Ambient[0]));
+ //   loc = glGetUniformLocation(programId, "mode");
+ //   glUniform1i(loc, mode);
+
+ //   // Draw all objects (This recursively traverses the object hierarchy.)
+ //   CHECKERROR;
+ //   teapot->drawMe = true; // Restore drawing of the teapot
+ //   objectRoot->Draw(lightingProgram, Identity);
+ //   CHECKERROR;
+
+ //   shadowFbo.UnbindTexture(2);
+ //   reflectionTopFbo.UnbindTexture(3);
+ //   reflectionBottomFbo.UnbindTexture(4);
+ //   sky->texture->UnbindTexture(5);
+ //   skyIrrMap->UnbindTexture(6);
+
+ //   // Turn off the shader
+ //   lightingProgram->UnuseShader();
+
+ //   ////////////////////////////////////////////////////////////////////////////////
+ //   // End of Lighting pass
+ //   ////////////////////////////////////////////////////////////////////////////////
 }
