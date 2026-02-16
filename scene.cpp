@@ -514,6 +514,12 @@ void Scene::CreateShader()
     CHECKERROR;
     int loc, programId;
 
+    // Set Light
+   glm::vec3 Light(3, 3, 3);
+   glm::vec3 Ambient(0.4, 0.4, 0.4);
+
+   eye = glm::vec3(WorldInverse * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+
     // -----------------------------------------------------------------
     // PASS 1: G Buffer Pass
     // Render all scene objects into the G-Buffer textures
@@ -524,7 +530,7 @@ void Scene::CreateShader()
     // Clear Color and Depth of the G-Buffer
     // We clear to black (0,0,0) so empty space has no position/normal data
     glViewport(0, 0, width, height);
-    glClearColor(0.5, 0.5, 0.5, 1.0);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     gBufferProgram->UseShader();
@@ -536,9 +542,19 @@ void Scene::CreateShader()
     loc = glGetUniformLocation(gBufferProgram->programId, "WorldProj");
     glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
 
+    // Set Light Position
+    loc = glGetUniformLocation(gBufferProgram->programId, "lightPos");
+    glUniform3fv(loc, 1, &lightPos[0]); // Ensure this variable exists in your class!
+
+    // Set View Position (Needed for Specular)
+    loc = glGetUniformLocation(gBufferProgram->programId, "eye");
+    glUniform3fv(loc, 1, &eye[0]);
+
     // Draw the entire scene hierarchy
     // Note: The 'Draw' method in your Object class sets the Model matrix
+    CHECKERROR;
     objectRoot->Draw(gBufferProgram, Identity);
+    CHECKERROR;
 
     gBufferProgram->UnuseShader();
     gBufferFbo.UnbindFBO();
@@ -556,86 +572,64 @@ void Scene::CreateShader()
 
     // Clear the screen (optional, but good practice)
     glViewport(0, 0, width, height);
-    glClearColor(0.0, 0.0, 0.0, 1.0);
+    glClearColor(0.0, 0.0, 0.0, 0.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     deferredLightProgram->UseShader();
 
     // 2. Bind G-Buffer (We only need to do this ONCE for all lights)
-    gBufferFbo.BindGBufferTextures(0, deferredLightProgram->programId,
-        "gPosition", "gNormal", "gAlbedoSpec");
+    gBufferFbo.BindGBufferTextures(2, deferredLightProgram->programId,
+        "gFragData", "gLightVec", "gEyeVec");
 
-    // 3. Enable Additive Blending
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_ONE, GL_ONE); // Source + Destination
-    glDepthMask(GL_FALSE); // Stop writing to depth buffer (optional but good practice)
-    glDisable(GL_DEPTH_TEST); // We don't need depth testing for a full screen quad
+    loc = glGetUniformLocation(deferredLightProgram->programId, "Ambient");
+    glUniform3fv(loc, 1, &(Ambient[0]));
 
-    if (showDebug)
-    {
-        // -------------------------------------------------
-        // DEBUG MODE: Draw 4 Quadrants
-        // -------------------------------------------------
+    glDisable(GL_BLEND);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_DEPTH_TEST);
 
-        int w = width; // current window width
-        int h = height; // current window height
-        int loc = glGetUniformLocation(deferredLightProgram->programId, "viewMode");
+    // -------------------------------------------------
+    // STANDARD MODE: Full Screen Lighting Loop
+    // -------------------------------------------------
+    loc = glGetUniformLocation(deferredLightProgram->programId, "viewMode");
+    glUniform1i(loc, 0); // Force Mode 0 (Lighting)
 
-        // Top Left: Position (Mode 1)
-        glViewport(0, h / 2, w / 2, h / 2);
-        glUniform1i(loc, 1);
-        fullScreenQuad->Draw(deferredLightProgram, Identity);
+    // Set Light Position
+    loc = glGetUniformLocation(deferredLightProgram->programId, "lightPos");
+    glUniform3fv(loc, 1, &lightPos[0]); // Ensure this variable exists in your class!
 
-        // Top Right: Normal (Mode 2)
-        glViewport(w / 2, h / 2, w / 2, h / 2);
-        glUniform1i(loc, 2);
-        fullScreenQuad->Draw(deferredLightProgram, Identity);
+    // Set Light Color
+    glm::vec3 debugLightColor(1.0, 1.0, 1.0); // Bright White
+    loc = glGetUniformLocation(deferredLightProgram->programId, "lightColor");
+    glUniform3fv(loc, 1, &debugLightColor[0]);
 
-        // Bottom Left: Albedo (Mode 3)
-        glViewport(0, 0, w / 2, h / 2);
-        glUniform1i(loc, 3);
-        fullScreenQuad->Draw(deferredLightProgram, Identity);
+    // Set View Position (Needed for Specular)
+    loc = glGetUniformLocation(deferredLightProgram->programId, "viewPos");
+    glUniform3fv(loc, 1, &eye[0]);
 
-        // Bottom Right: Final Lighting (Mode 0)
-        glViewport(w / 2, 0, w / 2, h / 2);
+    loc = glGetUniformLocation(deferredLightProgram->programId, "width");
+    glUniform1f(loc, width);
 
-        // Set Mode to 0 (Lighting)
-        glUniform1i(loc, 0);
+    loc = glGetUniformLocation(deferredLightProgram->programId, "height");
+    glUniform1f(loc, height);
 
-        // Set Light Position
-        int lightLoc = glGetUniformLocation(deferredLightProgram->programId, "lightPos");
-        glUniform3fv(lightLoc, 1, &lightPos[0]); // Ensure this variable exists in your class!
+    // Set Light Position
+    loc = glGetUniformLocation(deferredLightProgram->programId, "sceneLightPos");
+    glUniform3fv(loc, 1, &lightPos[0]); // Ensure this variable exists in your class!
 
-        // Set Light Color
-        glm::vec3 debugLightColor(1.0, 1.0, 1.0); // Bright White
-        int colorLoc = glGetUniformLocation(deferredLightProgram->programId, "lightColor");
-        glUniform3fv(colorLoc, 1, &debugLightColor[0]);
+    // Set View Position
+    loc = glGetUniformLocation(deferredLightProgram->programId, "sceneEye");
+    glUniform3fv(loc, 1, &eye[0]);
 
-        // Set View Position (Needed for Specular)
-        int viewLoc = glGetUniformLocation(deferredLightProgram->programId, "viewPos");
-        glUniform3fv(viewLoc, 1, &eye[0]);
+    CHECKERROR;
+    fullScreenQuad->Draw(deferredLightProgram, Identity);
+    CHECKERROR;
 
-        fullScreenQuad->Draw(deferredLightProgram, Identity);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
 
-        // RESTORE VIEWPORT (Very Important!)
-        glViewport(0, 0, w, h);
-    }
-    else
-    {
-        // -------------------------------------------------
-        // STANDARD MODE: Full Screen Lighting Loop
-        // -------------------------------------------------
-        glViewport(0, 0, width, height);
-        int loc = glGetUniformLocation(deferredLightProgram->programId, "viewMode");
-        glUniform1i(loc, 0); // Force Mode 0 (Lighting)
-    }
-
-    // 5. Clean Up
-    glDisable(GL_BLEND);      // Turn off blending so UI/Debug draws correctly
-    glDepthMask(GL_TRUE);     // Re-enable depth writing
-    glEnable(GL_DEPTH_TEST);  // Re-enable depth testing
-
-    gBufferFbo.UnbindGBufferTextures(0);
+    gBufferFbo.UnbindGBufferTextures(2);
     deferredLightProgram->UnuseShader();
 
  //   ////////////////////////////////////////////////////////////////////////////////

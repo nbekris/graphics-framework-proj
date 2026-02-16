@@ -58,7 +58,8 @@ void FBO::CreateFBO(const int w, const int h)
 }
 
 void FBO::BindFBO() { glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, fboID); }
-void FBO::UnbindFBO() { glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0); }
+void FBO::UnbindFBOEXT() { glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0); }
+void FBO::UnbindFBO() { glBindFramebuffer(GL_FRAMEBUFFER, 0); }
 
 void FBO::BindTexture(const int unit, const int programId, const std::string& name)
 {
@@ -75,10 +76,11 @@ void FBO::UnbindTexture(const int unit)
 }
 
 ////////////////////////////////////////////////////////////////////////
-// Creates a G-Buffer with 3 Render Targets
-// Position (RGB16F)
-// Normal (RGB16F)
-// Albedo + Specular (RGBA)
+// Creates a G-Buffer with 4 Render Targets
+// Position
+// Normal
+// Albedo
+// Specular
 ////////////////////////////////////////////////////////////////////////
 void FBO::CreateGBuffer(const int w, const int h)
 {
@@ -88,36 +90,51 @@ void FBO::CreateGBuffer(const int w, const int h)
     // Generate and Bind Framebuffer
     glGenFramebuffers(1, &fboID);
     glBindFramebuffer(GL_FRAMEBUFFER, fboID);
+    glGenTextures(4, gFragData);
 
-    // Position Buffer
-    glGenTextures(1, &gPosition);
-    glBindTexture(GL_TEXTURE_2D, gPosition);
+    for (unsigned int i = 0; i < 4; i++) {
+        glBindTexture(GL_TEXTURE_2D, gFragData[i]);
+
+        // Note: Using GL_RGBA16F for high precision (needed for Normals/Positions)
+        // If this is just Albedo/Color, GL_RGBA8 is fine.
+        glTexImage2D(GL_TEXTURE_2D, 0, (int)GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, NULL);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (int)GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (int)GL_NEAREST);
+
+        // Bind to Attachment 0, 1, 2, 3 respectively
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, GL_TEXTURE_2D, gFragData[i], 0);
+    }
+
+    // Light Vector buffer
+    glGenTextures(1, &gLightVec);
+    glBindTexture(GL_TEXTURE_2D, gLightVec);
     glTexImage2D(GL_TEXTURE_2D, 0, (int)GL_RGB16F, width, height, 0, GL_RGB, GL_FLOAT, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (int)GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (int)GL_NEAREST);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gPosition, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT4, GL_TEXTURE_2D, gLightVec, 0);
 
-    // Normal Buffer
-    glGenTextures(1, &gNormal);
-    glBindTexture(GL_TEXTURE_2D, gNormal);
+    // Eye Vector buffer
+    glGenTextures(1, &gEyeVec);
+    glBindTexture(GL_TEXTURE_2D, gEyeVec);
     glTexImage2D(GL_TEXTURE_2D, 0, (int)GL_RGB16F, width, height, 0, GL_RGB, GL_FLOAT, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (int)GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (int)GL_NEAREST);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, gNormal, 0);
-
-    // Albedo + Specular Buffer
-    glGenTextures(1, &gAlbedoSpec);
-    glBindTexture(GL_TEXTURE_2D, gAlbedoSpec);
-    glTexImage2D(GL_TEXTURE_2D, 0, (int)GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (int)GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (int)GL_NEAREST);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, gAlbedoSpec, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT5, GL_TEXTURE_2D, gEyeVec, 0);
 
     // Tell OpenGL which color attachments we will use for rendering
-    const GLenum attachments[3] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
-    glDrawBuffers(3, attachments);
+    const GLenum attachments[6] = {
+        GL_COLOR_ATTACHMENT0, // FragData[0]
+        GL_COLOR_ATTACHMENT1, // FragData[1]
+        GL_COLOR_ATTACHMENT2, // FragData[2]
+        GL_COLOR_ATTACHMENT3, // FragData[3]
+        GL_COLOR_ATTACHMENT4, // LightVec (Location 4)
+        GL_COLOR_ATTACHMENT5  // EyeVec   (Location 5)
+    };
+    glDrawBuffers(6, attachments);
 
     // Create and attach Depth Buffer (Renderbuffer)
+    unsigned int depthBuffer;
     glGenRenderbuffers(1, &depthBuffer);
     glBindRenderbuffer(GL_RENDERBUFFER, depthBuffer);
     glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, width, height);
@@ -132,39 +149,54 @@ void FBO::CreateGBuffer(const int w, const int h)
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void FBO::BindGBufferTextures(int startUnit, int programId,
-    std::string posName, std::string normName, std::string albedoName)
+void FBO::BindGBufferTextures(int startUnit, int programId, 
+    std::string fragDataName, std::string lightVecName, std::string eyeVecName)
 {
-    // Bind Position
-    glActiveTexture((GLenum)((int)GL_TEXTURE0 + startUnit));
-    glBindTexture(GL_TEXTURE_2D, gPosition);
-    int loc = glGetUniformLocation(programId, posName.c_str());
-    glUniform1i(loc, startUnit);
+    int fragDataValues[4]; // To store the units for the uniform array
 
-    // Bind Normal
-    glActiveTexture((GLenum)((int)GL_TEXTURE0 + startUnit + 1));
-    glBindTexture(GL_TEXTURE_2D, gNormal);
-    loc = glGetUniformLocation(programId, normName.c_str());
-    glUniform1i(loc, startUnit + 1);
+    for (int i = 0; i < 4; i++)
+    {
+        glActiveTexture((GLenum)((int)GL_TEXTURE0 + startUnit + i));
+        glBindTexture(GL_TEXTURE_2D, gFragData[i]); // Requires gFragData to be an array!
 
-    // Bind Albedo
-    glActiveTexture((GLenum)((int)GL_TEXTURE0 + startUnit + 2));
-    glBindTexture(GL_TEXTURE_2D, gAlbedoSpec);
-    loc = glGetUniformLocation(programId, albedoName.c_str());
-    glUniform1i(loc, startUnit + 2);
+        fragDataValues[i] = startUnit + i;
+    }
+
+    int loc = glGetUniformLocation(programId, fragDataName.c_str());
+    if (loc != -1) glUniform1iv(loc, 4, fragDataValues);
+
+    int lightUnit = startUnit + 4;
+    glActiveTexture((GLenum)((int)GL_TEXTURE0 + lightUnit));
+    glBindTexture(GL_TEXTURE_2D, gLightVec);
+
+    loc = glGetUniformLocation(programId, lightVecName.c_str());
+    glUniform1i(loc, lightUnit);
+
+    int eyeUnit = startUnit + 5;
+    glActiveTexture((GLenum)((int)GL_TEXTURE0 + eyeUnit));
+    glBindTexture(GL_TEXTURE_2D, gEyeVec);
+
+    loc = glGetUniformLocation(programId, eyeVecName.c_str());
+    glUniform1i(loc, eyeUnit);
 }
 
 void FBO::UnbindGBufferTextures(int startUnit)
 {
-    // Unbind Position
-    glActiveTexture((GLenum)((int)GL_TEXTURE0 + startUnit));
+    int fragDataValues[4]; // To store the units for the uniform array
+
+    for (int i = 0; i < 4; i++)
+    {
+        glActiveTexture((GLenum)((int)GL_TEXTURE0 + startUnit + i));
+        glBindTexture(GL_TEXTURE_2D, 0); // Requires gFragData to be an array!
+
+        fragDataValues[i] = startUnit + i;
+    }
+
+    int lightUnit = startUnit + 4;
+    glActiveTexture((GLenum)((int)GL_TEXTURE0 + lightUnit));
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    // Unbind Normal
-    glActiveTexture((GLenum)((int)GL_TEXTURE0 + startUnit + 1));
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    // Unbind Albedo
-    glActiveTexture((GLenum)((int)GL_TEXTURE0 + startUnit + 2));
+    int eyeUnit = startUnit + 5;
+    glActiveTexture((GLenum)((int)GL_TEXTURE0 + eyeUnit));
     glBindTexture(GL_TEXTURE_2D, 0);
 }

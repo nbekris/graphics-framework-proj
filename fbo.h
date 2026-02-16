@@ -15,14 +15,22 @@ public:
     // --- G-Buffer specific textures ---
     unsigned int gPosition;
     unsigned int gNormal;
-    unsigned int gAlbedoSpec;
+    unsigned int gAlbedo;
+    unsigned int gSpec;
+
+    unsigned int gFragData[4];
+    unsigned int gLightVec;
+    unsigned int gEyeVec;
+
     unsigned int depthBuffer;
 
     void CreateFBO(const int w, const int h);
     // Bind this FBO to receive the output of the graphics pipeline.
     void BindFBO();
     // Unbind this FBO from the graphics pipeline;  graphics goes to screen by default.
-    void UnbindFBO();
+    void UnbindFBOEXT();
+    // Unbind FBO modern version
+    void FBO::UnbindFBO();
     // Bind this FBO's texture to a texture unit.
     void BindTexture(const int unit, const int programId, const std::string& name);
     // Unbind this FBO's texture from a texture unit.
@@ -33,7 +41,7 @@ public:
 
     // Helper to bind all 3 textures at once for the lighting pass
     void BindGBufferTextures(int startUnit, int programId,
-        std::string posName, std::string normName, std::string albedoName);
+        std::string fragDataName, std::string lightVecName, std::string eyeVecName);
 
     // Helper to unbind all 3 textures
     void UnbindGBufferTextures(int startUnit);

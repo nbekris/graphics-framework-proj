@@ -1,37 +1,38 @@
 #version 330 core
 
-// These correspond to GL_COLOR_ATTACHMENT 0, 1, and 2
-layout (location = 0) out vec3 gPosition;
-layout (location = 1) out vec3 gNormal;
-layout (location = 2) out vec4 gAlbedoSpec;
+layout (location = 0) out vec4 FragData[4];
+layout (location = 4) out vec3 LightVec;
+layout (location = 5) out vec3 EyeVec;
 
 in vec2 TexCoords;
-in vec3 FragPos;
+in vec3 worldPos;
 in vec3 Normal;
 
-uniform sampler2D tex;       // Object.cpp binds texture to "tex"
-uniform vec3 diffuse;        // Object.cpp sends "diffuse"
+in vec3 lightVec, eyeVec;
+
+uniform vec3 diffuse;        // Object.cpp sends "diffuse" --- Kd
 uniform float hasTexture;    // Object.cpp sends "hasTexture" as a float
-uniform vec3 specular;       // Object.cpp sends "specular"
+uniform vec3 specular;       // Object.cpp sends "specular" ---- Ks
+uniform float shininess;     // Alpha
+
+uniform vec3 viewPos;
+uniform vec3 lightPos;
+
+uniform sampler2D tex;
 
 void main()
 {    
-    // Position
-    gPosition = FragPos;
+	FragData[0] = vec4(worldPos, 1.0);
+	FragData[1] = vec4(Normal, 1.0);
 
-    // Normal
-    gNormal = normalize(Normal);
+	if (hasTexture > 0.5) {
+		FragData[2] = vec4(texture(tex, TexCoords).rgb, 1.0);
+	} else {
+		FragData[2] = vec4(diffuse, 1.0);
+	}
 
-    // Albedo (Color)
-    // Your C++ sends hasTexture as a float (0.0 or 1.0)
-    if (hasTexture > 0.5) {
-        gAlbedoSpec.rgb = texture(tex, TexCoords).rgb;
-    } else {
-        gAlbedoSpec.rgb = diffuse;
-    }
+	FragData[3] = vec4(specular, shininess);
 
-    // Specular Intensity
-    // We'll store the "red" component of the specular color as intensity
-    // (Simple approximation for deferred)
-    gAlbedoSpec.a = specular.r; 
+	LightVec = normalize(lightPos - worldPos);
+    EyeVec   = normalize(viewPos - worldPos);
 }
