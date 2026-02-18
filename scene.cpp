@@ -633,10 +633,6 @@ void Scene::CreateShader()
     loc = glGetUniformLocation(deferredLightProgram->programId, "Ambient");
     glUniform3fv(loc, 1, &(Ambient[0]));
 
-    glDisable(GL_BLEND);
-    //glDepthMask(GL_FALSE);
-    //glDisable(GL_DEPTH_TEST);
-
     loc = glGetUniformLocation(deferredLightProgram->programId, "viewMode");
     glUniform1i(loc, 0);
 
@@ -684,21 +680,15 @@ void Scene::CreateShader()
     // Render many local lights
     // -----------------------------------------------------------------
 
-    localLightsProgram->UseShader();
+    glBlendFunc(GL_ONE, GL_ONE);
+    glEnable(GL_BLEND);
 
-    //glBlendFunc(GL_ONE, GL_ONE);
-    //glEnable(GL_BLEND);
-
-    //glCullFace(GL_FRONT);
-    //glEnable(GL_CULL_FACE);
+    glCullFace(GL_FRONT);
+    glEnable(GL_CULL_FACE);
 
     glDisable(GL_DEPTH_TEST);
-	glDepthMask(GL_FALSE);
 
-    glEnable(GL_BLEND);
-	glBlendFunc(GL_ONE, GL_ONE);
-
-    glDisable(GL_CULL_FACE);
+    localLightsProgram->UseShader();
 
     programId = localLightsProgram->programId;
 
@@ -728,7 +718,7 @@ void Scene::CreateShader()
 
     lightVolumeSphere->Draw(localLightsProgram, Scale(3.0, 3.0, 3.0));
 
-    //int numLights = 32;
+    //int numLights = 1;
 
     //for (int i = 0; i < numLights; ++i) {
     //    const glm::vec3 position = lightPositions[i];
@@ -744,22 +734,24 @@ void Scene::CreateShader()
     //    glUniform1fv(rangeLoc, 1, &range);
 
     //    CHECKERROR;
-    //    lightVolumeSphere->Draw(localLightsProgram, model);
+    //    //lightVolumeSphere->Draw(localLightsProgram, model);
     //    //lightVolumeSphere->DrawVAO();
     //    //objectRoot->Draw(localLightsProgram, model);
     //    CHECKERROR;
     //}
 
+    //lightVolumeSphere->Draw(localLightsProgram, Scale(3.0, 3.0, 3.0));
+
     // Clean up
-    //glDisable(GL_BLEND);
-    //glCullFace(GL_BACK);
-    //glDisable(GL_CULL_FACE);
+    glDisable(GL_BLEND);
+    glCullFace(GL_BACK);
+    glDisable(GL_CULL_FACE);
 
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
-    glDisable(GL_BLEND);
+    //glEnable(GL_CULL_FACE);
+    //glCullFace(GL_BACK);
+    //glDisable(GL_BLEND);
 
     gBufferFbo.UnbindGBufferTextures(2);
     localLightsProgram->UnuseShader();

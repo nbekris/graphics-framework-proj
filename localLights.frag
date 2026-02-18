@@ -48,13 +48,10 @@ float SmithMethod(float VN, float LN, float roughness)
 }
 
 void main() {
-	FragColor = vec4(0.2, 0.1, 0.0, 1.0);
+	FragColor = vec4(0.2, 0.0, 0.0, 1.0);
 	return;
 
 	vec2 uv = gl_FragCoord.xy / vec2(width, height);
-
-	FragColor = texture(gFragData[2], uv);
-	return;
 
 	// 1. Retrieve data
 	vec3 FragPos = texture(gFragData[0], uv).rgb;
@@ -71,6 +68,10 @@ void main() {
 //	if (distance < 0.5) {
 //		FragColor = vec4(lightColor, 1.0);
 //		return;
+//	}
+
+//	if (length(Normal) < 0.001) {
+//		discard;
 //	}
 
 	if (distance >= lightRadius) {
