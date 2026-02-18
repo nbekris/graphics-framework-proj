@@ -48,8 +48,8 @@ float SmithMethod(float VN, float LN, float roughness)
 }
 
 void main() {
-	FragColor = vec4(0.2, 0.0, 0.0, 1.0);
-	return;
+//	FragColor = vec4(0.2, 0.0, 0.0, 1.0);
+//	return;
 
 	vec2 uv = gl_FragCoord.xy / vec2(width, height);
 

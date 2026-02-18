@@ -43,6 +43,8 @@ const bool fullPolyCount = true; // Use false when emulating the graphics pipeli
 const float PI = 3.14159f;
 const float rad = PI/180.0f;    // Convert degrees to radians
 
+const int numLights = 128;
+
 glm::mat4 Identity(1.0);
 glm::mat4 ShadowMatrix;
 glm::mat4 ShadowView;
@@ -202,23 +204,24 @@ void Scene::InitializeScene()
     lightColors.clear();
     lightRanges.clear();
 
-    int numLights = 32;
-    float radius = 4.0f;
+    float radius = 12.0f;
 
     for (int i = 0; i < numLights; i++) {
-        float angle = (float)i / (float)numLights * PI * 2.0f;
+        float angle = (float)i / (float)numLights * PI * 10.0f;
 
         float x = cos(angle) * radius;
         float z = sin(angle) * radius;
-        float y = 1.0f;
+        float y = 0.09f * i;
 
-        lightPositions.push_back(glm::vec3(x, y, z));
+		glm::vec3 pos = glm::vec3(x, z, y);
+
+        lightPositions.push_back(pos);
         if (i % 3 == 0)      lightColors.push_back(glm::vec3(10.0f, 2.0f, 2.0f));
         else if (i % 3 == 1) lightColors.push_back(glm::vec3(2.0f, 10.0f, 2.0f));
         else                 lightColors.push_back(glm::vec3(2.0f, 2.0f, 10.0f));
 
         // Range: Medium size
-        lightRanges.push_back(2.0f);
+        lightRanges.push_back(5.0f);
     }
 
     CHECKERROR;
@@ -229,7 +232,6 @@ void Scene::InitializeScene()
         glm::vec3(0, 0, 0), glm::vec3(0, 0, 0), 0, false,
         NULL,
         NULL);
-    //fullScreenQuad = new Quad();
 
     shadowFbo.CreateFBO(1000, 1000);
 	reflectionTopFbo.CreateFBO(1024, 1024);
@@ -260,40 +262,6 @@ void Scene::InitializeScene()
 
     // Create the lighting shader program from source code files.
     // @@ Initialize additional shaders if necessary
- //   lightingProgram = new ShaderProgram();
- //   lightingProgram->AddShader("final.vert", GL_VERTEX_SHADER);
- //   lightingProgram->AddShader("final.frag", GL_FRAGMENT_SHADER);
- //   lightingProgram->AddShader("lighting.vert", GL_VERTEX_SHADER);
- //   lightingProgram->AddShader("lighting.frag", GL_FRAGMENT_SHADER);
-
- //   shadowProgram = new ShaderProgram();
- //   shadowProgram->AddShader("shadow.frag", GL_FRAGMENT_SHADER);
- //   shadowProgram->AddShader("shadow.vert", GL_VERTEX_SHADER);
-
-	//reflectionProgram = new ShaderProgram();
-	//reflectionProgram->AddShader("reflection.frag", GL_FRAGMENT_SHADER);
-	//reflectionProgram->AddShader("reflection.vert", GL_VERTEX_SHADER);
- //   reflectionProgram->AddShader("lighting.vert", GL_VERTEX_SHADER);
- //   reflectionProgram->AddShader("lighting.frag", GL_FRAGMENT_SHADER);
-
- //   glBindAttribLocation(lightingProgram->programId, 0, "vertex");
- //   glBindAttribLocation(lightingProgram->programId, 1, "vertexNormal");
- //   glBindAttribLocation(lightingProgram->programId, 2, "vertexTexture");
- //   glBindAttribLocation(lightingProgram->programId, 3, "vertexTangent");
- //   lightingProgram->LinkProgram();
-
- //   glBindAttribLocation(shadowProgram->programId, 0, "vertex");
- //   glBindAttribLocation(shadowProgram->programId, 1, "vertexNormal");
- //   glBindAttribLocation(shadowProgram->programId, 2, "vertexTexture");
- //   glBindAttribLocation(shadowProgram->programId, 3, "vertexTangent");
- //   shadowProgram->LinkProgram();
-
- //   glBindAttribLocation(reflectionProgram->programId, 0, "vertex");
- //   glBindAttribLocation(reflectionProgram->programId, 1, "vertexNormal");
- //   glBindAttribLocation(reflectionProgram->programId, 2, "vertexTexture");
- //   glBindAttribLocation(reflectionProgram->programId, 3, "vertexTangent");
- //   reflectionProgram->LinkProgram();
-
 
     
     // Create all the Polygon shapes
@@ -716,29 +684,25 @@ void Scene::CreateShader()
     gBufferFbo.BindGBufferTextures(2, programId,
         "gFragData", "gLightVec", "gEyeVec");
 
-    lightVolumeSphere->Draw(localLightsProgram, Scale(3.0, 3.0, 3.0));
+    for (int i = 0; i < numLights; ++i) {
+        const glm::vec3 position = lightPositions[i];
+        const glm::vec3 color = lightColors[i];
 
-    //int numLights = 1;
+        const float range = lightRanges[i];
 
-    //for (int i = 0; i < numLights; ++i) {
-    //    const glm::vec3 position = lightPositions[i];
-    //    const glm::vec3 color = lightColors[i];
+        // Calculate the model matrix
+        glm::mat4 model = Translate(position.x, position.y, position.z) * Scale(range, range, range);
 
-    //    const float range = lightRanges[i];
+        glUniform3fv(colorLoc, 1, &color[0]);
+        glUniform3fv(lightPosLoc, 1, &position[0]);
+        glUniform1fv(rangeLoc, 1, &range);
 
-    //    // Calculate the model matrix
-    //    glm::mat4 model = Translate(position.x, position.y, position.z) * Scale(range, range, range);
-
-    //    glUniform3fv(colorLoc, 1, &color[0]);
-    //    glUniform3fv(lightPosLoc, 1, &position[0]);
-    //    glUniform1fv(rangeLoc, 1, &range);
-
-    //    CHECKERROR;
-    //    //lightVolumeSphere->Draw(localLightsProgram, model);
-    //    //lightVolumeSphere->DrawVAO();
-    //    //objectRoot->Draw(localLightsProgram, model);
-    //    CHECKERROR;
-    //}
+        CHECKERROR;
+        lightVolumeSphere->Draw(localLightsProgram, model);
+        //lightVolumeSphere->DrawVAO();
+        //objectRoot->Draw(localLightsProgram, model);
+        CHECKERROR;
+    }
 
     //lightVolumeSphere->Draw(localLightsProgram, Scale(3.0, 3.0, 3.0));
 
@@ -749,9 +713,6 @@ void Scene::CreateShader()
 
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
-    //glEnable(GL_CULL_FACE);
-    //glCullFace(GL_BACK);
-    //glDisable(GL_BLEND);
 
     gBufferFbo.UnbindGBufferTextures(2);
     localLightsProgram->UnuseShader();
