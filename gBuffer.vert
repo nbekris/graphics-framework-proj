@@ -19,14 +19,12 @@ uniform mat4 NormalTr; // Inverse Transpose of ModelTr (usually passed by Object
 void main()
 {
     // Calculate World Position
-    //vec4 worldPos = ModelTr * vec4(vertex, 1.0);
     worldPos = (ModelTr*vertex).xyz;
     
     TexCoords = vertexTexture;
     
-    // Calculate Normal in World Space
-    // Note: If you don't calculate NormalTr in C++, use transpose(inverse(mat3(ModelTr))) here
-    Normal = vertexNormal * mat3(NormalTr); //mat3(NormalTr) * vertexNormal;
+    Normal = vertexNormal * mat3(NormalTr);
+    //Normal = mat3(NormalTr) * vertexNormal;
 
     // Lighting eye calc
     lightVec = lightPos - worldPos;

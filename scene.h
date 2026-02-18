@@ -62,8 +62,6 @@ public:
     float lightSpin, lightTilt, lightDist;
     glm::vec3 lightPos;
     // @@ Perhaps declare additional scene lighting values here. (lightVal, lightAmb)
-    
-
 
     int mode; // Extra mode indicator hooked up to number keys and sent to shader
     
@@ -75,6 +73,7 @@ public:
 
     // All objects in the scene are children of this single root object.
     Object* objectRoot;
+    Object* lightVolumeSphere;
     Object *central, *anim, *room, *floor, *teapot, *podium, *sky,
             *ground, *sea, *spheres, *leftFrame, *rightFrame;
 
@@ -91,6 +90,7 @@ public:
 	ShaderProgram* reflectionProgram;
 	ShaderProgram* gBufferProgram;
     ShaderProgram* deferredLightProgram;
+    ShaderProgram* localLightsProgram;
 
     // Options menu stuff
     bool show_demo_window;
