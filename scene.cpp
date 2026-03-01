@@ -260,6 +260,16 @@ void Scene::InitializeScene()
     glBindAttribLocation(localLightsProgram->programId, 0, "vertex");
     localLightsProgram->LinkProgram();
 
+	// Shadow Map Shader Program Initialization
+    shadowProgram = new ShaderProgram();
+    shadowProgram->AddShader("shadow.frag", GL_FRAGMENT_SHADER);
+    shadowProgram->AddShader("shadow.vert", GL_VERTEX_SHADER);
+    glBindAttribLocation(shadowProgram->programId, 0, "vertex");
+    glBindAttribLocation(shadowProgram->programId, 1, "vertexNormal");
+    glBindAttribLocation(shadowProgram->programId, 2, "vertexTexture");
+    glBindAttribLocation(shadowProgram->programId, 3, "vertexTangent");
+    shadowProgram->LinkProgram();
+
     // Create the lighting shader program from source code files.
     // @@ Initialize additional shaders if necessary
 
@@ -539,8 +549,40 @@ void Scene::CreateShader()
 
    eye = glm::vec3(WorldInverse * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
 
+   // -----------------------------------------------------------------
+    // Shadow Pass
+    // Create Shadow Map
     // -----------------------------------------------------------------
-    // PASS 1: G Buffer Pass
+
+   shadowProgram->UseShader();
+
+   programId = shadowProgram->programId;
+   shadowFbo.BindFBO();
+
+   ShadowView = LookAt(lightPos, glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 0.0, 1.0));
+   ShadowProj = Perspective(40 / lightDist, 40 / lightDist, front, back);
+
+   // We clear to black (0,0,0) so empty space has no position/normal data
+   glViewport(0, 0, 1000, 1000);
+   glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+   loc = glGetUniformLocation(programId, "ProjectionMatrix");
+   glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowProj));
+   loc = glGetUniformLocation(programId, "ViewMatrix");
+   glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowView));
+
+   // Draw all objects (This recursively traverses the object hierarchy.)
+   CHECKERROR;
+   objectRoot->Draw(shadowProgram, Identity);
+   CHECKERROR;
+
+   // Turn off the shader
+   shadowFbo.UnbindFBO();
+   shadowProgram->UnuseShader();
+
+    // -----------------------------------------------------------------
+    // G Buffer Pass
     // Render all scene objects into the G-Buffer textures
     // -----------------------------------------------------------------
 
@@ -548,7 +590,7 @@ void Scene::CreateShader()
 
     // Clear Color and Depth of the G-Buffer
     // We clear to black (0,0,0) so empty space has no position/normal data
-    glViewport(0, 0, 750, 750);
+    glViewport(0, 0, 750, 750); // We might need to clear again
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -580,7 +622,7 @@ void Scene::CreateShader()
 
 
     // -----------------------------------------------------------------
-    // PASS 2: Lighting Pass
+    // Lighting Pass
     // Render a full-screen quad and calculate lighting per-pixel
     // -----------------------------------------------------------------
 
@@ -597,6 +639,14 @@ void Scene::CreateShader()
     // 2. Bind G-Buffer (We only need to do this ONCE for all lights)
     gBufferFbo.BindGBufferTextures(2, deferredLightProgram->programId,
         "gFragData", "gLightVec", "gEyeVec");
+
+    shadowFbo.BindTexture(8, deferredLightProgram->programId, "shadowMap");
+
+    const glm::mat4 B = Translate(0.5f, 0.5f, 0.5f) * Scale(0.5f, 0.5f, 0.5f);
+	ShadowMatrix = B * ShadowProj * ShadowView;
+
+    loc = glGetUniformLocation(programId, "ShadowMatrix");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowMatrix));
 
     loc = glGetUniformLocation(deferredLightProgram->programId, "Ambient");
     glUniform3fv(loc, 1, &(Ambient[0]));
@@ -632,15 +682,11 @@ void Scene::CreateShader()
     glUniform3fv(loc, 1, &eye[0]);
 
     CHECKERROR;
-    //fullScreenQuad->DrawVAO();
     fullScreenQuad->Draw(deferredLightProgram, Identity);
-    //objectRoot->Draw(deferredLightProgram, Identity);
     CHECKERROR;
 
-    //glDepthMask(GL_TRUE);
-    //glEnable(GL_DEPTH_TEST);
-
     gBufferFbo.UnbindGBufferTextures(2);
+	shadowFbo.UnbindTexture(6);
     deferredLightProgram->UnuseShader();
 
     // -----------------------------------------------------------------
@@ -648,72 +694,72 @@ void Scene::CreateShader()
     // Render many local lights
     // -----------------------------------------------------------------
 
-    glBlendFunc(GL_ONE, GL_ONE);
-    glEnable(GL_BLEND);
+    //glBlendFunc(GL_ONE, GL_ONE);
+    //glEnable(GL_BLEND);
 
-    glCullFace(GL_FRONT);
-    glEnable(GL_CULL_FACE);
+    //glCullFace(GL_FRONT);
+    //glEnable(GL_CULL_FACE);
 
-    glDisable(GL_DEPTH_TEST);
+    //glDisable(GL_DEPTH_TEST);
 
-    localLightsProgram->UseShader();
+    //localLightsProgram->UseShader();
 
-    programId = localLightsProgram->programId;
+    //programId = localLightsProgram->programId;
 
-    const GLint lightPosLoc = glGetUniformLocation(programId, "lightPos");
-    const GLint colorLoc = glGetUniformLocation(programId, "lightColor");
-    const GLint rangeLoc = glGetUniformLocation(programId, "lightRadius");
+    //const GLint lightPosLoc = glGetUniformLocation(programId, "lightPos");
+    //const GLint colorLoc = glGetUniformLocation(programId, "lightColor");
+    //const GLint rangeLoc = glGetUniformLocation(programId, "lightRadius");
 
-    loc = glGetUniformLocation(programId, "WorldView");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldView));
+    //loc = glGetUniformLocation(programId, "WorldView");
+    //glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldView));
 
-    loc = glGetUniformLocation(programId, "WorldProj");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
+    //loc = glGetUniformLocation(programId, "WorldProj");
+    //glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
 
-    loc = glGetUniformLocation(programId, "width");
-    glUniform1f(loc, width);
+    //loc = glGetUniformLocation(programId, "width");
+    //glUniform1f(loc, width);
 
-    loc = glGetUniformLocation(programId, "height");
-    glUniform1f(loc, height);
+    //loc = glGetUniformLocation(programId, "height");
+    //glUniform1f(loc, height);
 
-    // Set View Position (Needed for Specular)
-    loc = glGetUniformLocation(programId, "eye");
-    glUniform3fv(loc, 1, &eye[0]);
+    //// Set View Position (Needed for Specular)
+    //loc = glGetUniformLocation(programId, "eye");
+    //glUniform3fv(loc, 1, &eye[0]);
 
-    //// Bind G-Buffer (We only need to do this ONCE for all lights)
-    gBufferFbo.BindGBufferTextures(2, programId,
-        "gFragData", "gLightVec", "gEyeVec");
+    ////// Bind G-Buffer (We only need to do this ONCE for all lights)
+    //gBufferFbo.BindGBufferTextures(2, programId,
+    //    "gFragData", "gLightVec", "gEyeVec");
 
-    for (int i = 0; i < numLights; ++i) {
-        const glm::vec3 position = lightPositions[i];
-        const glm::vec3 color = lightColors[i];
+    //for (int i = 0; i < numLights; ++i) {
+    //    const glm::vec3 position = lightPositions[i];
+    //    const glm::vec3 color = lightColors[i];
 
-        const float range = lightRanges[i];
+    //    const float range = lightRanges[i];
 
-        // Calculate the model matrix
-        glm::mat4 model = Translate(position.x, position.y, position.z) * Scale(range, range, range);
+    //    // Calculate the model matrix
+    //    glm::mat4 model = Translate(position.x, position.y, position.z) * Scale(range, range, range);
 
-        glUniform3fv(colorLoc, 1, &color[0]);
-        glUniform3fv(lightPosLoc, 1, &position[0]);
-        glUniform1fv(rangeLoc, 1, &range);
+    //    glUniform3fv(colorLoc, 1, &color[0]);
+    //    glUniform3fv(lightPosLoc, 1, &position[0]);
+    //    glUniform1fv(rangeLoc, 1, &range);
 
-        CHECKERROR;
-        lightVolumeSphere->Draw(localLightsProgram, model);
-        //lightVolumeSphere->DrawVAO();
-        //objectRoot->Draw(localLightsProgram, model);
-        CHECKERROR;
-    }
+    //    CHECKERROR;
+    //    lightVolumeSphere->Draw(localLightsProgram, model);
+    //    //lightVolumeSphere->DrawVAO();
+    //    //objectRoot->Draw(localLightsProgram, model);
+    //    CHECKERROR;
+    //}
 
-    //lightVolumeSphere->Draw(localLightsProgram, Scale(3.0, 3.0, 3.0));
+    ////lightVolumeSphere->Draw(localLightsProgram, Scale(3.0, 3.0, 3.0));
 
-    // Clean up
-    glDisable(GL_BLEND);
-    glCullFace(GL_BACK);
-    glDisable(GL_CULL_FACE);
+    //// Clean up
+    //glDisable(GL_BLEND);
+    //glCullFace(GL_BACK);
+    //glDisable(GL_CULL_FACE);
 
-    glEnable(GL_DEPTH_TEST);
-    glDepthMask(GL_TRUE);
+    //glEnable(GL_DEPTH_TEST);
+    //glDepthMask(GL_TRUE);
 
-    gBufferFbo.UnbindGBufferTextures(2);
-    localLightsProgram->UnuseShader();
+    //gBufferFbo.UnbindGBufferTextures(2);
+    //localLightsProgram->UnuseShader();
 }

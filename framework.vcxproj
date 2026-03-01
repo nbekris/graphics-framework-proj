@@ -150,8 +150,12 @@
     <ClInclude Include="transform.h" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="deferredLight.frag" />
+    <None Include="deferredLight.vert" />
     <None Include="final.frag" />
     <None Include="final.vert" />
+    <None Include="gBuffer.frag" />
+    <None Include="gBuffer.vert" />
     <None Include="lighting.frag" />
     <None Include="lighting.vert" />
     <None Include="Makefile" />

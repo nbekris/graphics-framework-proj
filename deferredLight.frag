@@ -2,10 +2,12 @@
 out vec4 FragColor;
 
 in vec2 TexCoords;
+in vec4 shadowCoord;
 
 uniform sampler2D gFragData[4];
 uniform sampler2D gLightVec;
 uniform sampler2D gEyeVec;
+uniform sampler2D shadowMap;
 
 uniform vec3 lightPos;
 uniform vec3 viewPos;
@@ -49,10 +51,29 @@ float SmithMethod(float VN, float LN, float roughness)
 	return G1GGXSchlick(LN, roughness) * G1GGXSchlick(VN, roughness);
 }
 
+bool PixelInShadow()
+{
+	float lightDepth;
+	float pixelDepth;
+	vec2 shadowIndex = shadowCoord.xy / shadowCoord.w;
+	bool isShadowed = false;
+	float bias = 0.005;
+
+	if (shadowCoord.w > 0 && ((shadowIndex.x > 0 && shadowIndex.x < 1) && (shadowIndex.y > 0 && shadowIndex.y < 1)))
+	{
+		lightDepth = texture(shadowMap, shadowIndex).w;
+		pixelDepth = shadowCoord.w;
+
+		isShadowed = pixelDepth - bias > lightDepth;
+	}
+
+	return isShadowed;
+}
+
 void main()
 {       
 	vec2 uv = gl_FragCoord.xy / vec2(width, height);
-//	FragColor = texture(gFragData[2], uv);
+//	FragColor.xyz = vec3(texture(shadowMap, uv).w / 100.0);
 //	return;
 
 	//vec2 uv = TexCoords;
@@ -96,7 +117,11 @@ void main()
 	vec3 totalBRDF = Fd + Fs;
 	vec3 directLight = totalBRDF * lightColor * LN;
 	vec3 ambient = Ambient * kD;
-    
-    FragColor = vec4(directLight + ambient, 1.0);
+
+	if (PixelInShadow()) {
+		FragColor = vec4(ambient, 1.0);
+	} else {
+		FragColor = vec4(directLight + ambient, 1.0);	
+	}
 	//FragColor.xyz = directLight + ambient;
 }
