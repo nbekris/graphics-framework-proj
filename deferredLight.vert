@@ -9,7 +9,7 @@ out vec4 shadowCoord;
 
 void main()
 {
-	shadowCoord = ShadowMatrix * ModelTr * vec4(vertex, 0.0);
+	shadowCoord = ShadowMatrix * ModelTr * vec4(vertex, 1.0);
 
     TexCoords = vertexTexture;
     gl_Position = vec4(vertex.x, vertex.y, 0.0, 1.0); 

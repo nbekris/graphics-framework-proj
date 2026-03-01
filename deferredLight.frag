@@ -8,6 +8,7 @@ uniform sampler2D gFragData[4];
 uniform sampler2D gLightVec;
 uniform sampler2D gEyeVec;
 uniform sampler2D shadowMap;
+uniform mat4 ShadowMatrix;
 
 uniform vec3 lightPos;
 uniform vec3 viewPos;
@@ -51,18 +52,21 @@ float SmithMethod(float VN, float LN, float roughness)
 	return G1GGXSchlick(LN, roughness) * G1GGXSchlick(VN, roughness);
 }
 
-bool PixelInShadow()
+bool PixelInShadow(vec3 FragPos, vec3 lightVec, vec3 Normal)
 {
+	vec4 fragPosLightSpace = ShadowMatrix * vec4(FragPos, 1.0);
+	//vec4 fragPosLightSpace = shadowCoord;
+
 	float lightDepth;
 	float pixelDepth;
-	vec2 shadowIndex = shadowCoord.xy / shadowCoord.w;
+	vec2 shadowIndex = fragPosLightSpace.xy / fragPosLightSpace.w;
 	bool isShadowed = false;
-	float bias = 0.005;
+	float bias = max(0.05 * (1.0 - dot(Normal, lightVec)), 0.005);
 
-	if (shadowCoord.w > 0 && ((shadowIndex.x > 0 && shadowIndex.x < 1) && (shadowIndex.y > 0 && shadowIndex.y < 1)))
+	if (fragPosLightSpace.w > 0 && ((shadowIndex.x > 0 && shadowIndex.x < 1) && (shadowIndex.y > 0 && shadowIndex.y < 1)))
 	{
 		lightDepth = texture(shadowMap, shadowIndex).w;
-		pixelDepth = shadowCoord.w;
+		pixelDepth = fragPosLightSpace.w;
 
 		isShadowed = pixelDepth - bias > lightDepth;
 	}
@@ -118,8 +122,9 @@ void main()
 	vec3 directLight = totalBRDF * lightColor * LN;
 	vec3 ambient = Ambient * kD;
 
-	if (PixelInShadow()) {
+	if (PixelInShadow(FragPos, lightVec, Normal)) {
 		FragColor = vec4(ambient, 1.0);
+		//FragColor.xyz = vec3(1.0, 0.0, 0.0); // red for shadowed pixels
 	} else {
 		FragColor = vec4(directLight + ambient, 1.0);	
 	}

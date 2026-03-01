@@ -156,6 +156,7 @@
     <None Include="final.vert" />
     <None Include="gBuffer.frag" />
     <None Include="gBuffer.vert" />
+    <None Include="glsl deferredLight.frag" />
     <None Include="lighting.frag" />
     <None Include="lighting.vert" />
     <None Include="Makefile" />
