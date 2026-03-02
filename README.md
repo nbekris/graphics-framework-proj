@@ -96,28 +96,6 @@ The project utilizes the **Blinn-Phong** algorithm, with calculations performed 
 * Creating a multi-pass rendering architecture.
 
 
-
----
-
-## Image Examples
-
-* 
-**Top Left:** Pixel Position 
-
-
-* 
-**Top Right:** Normals 
-
-
-* 
-**Bottom Left:** Albedo/Diffuse 
-
-
-* 
-**Bottom Right:** Specular/Shininess 
-
-
-
 ---
 
 ## 🔗 References
