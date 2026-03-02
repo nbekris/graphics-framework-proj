@@ -1,15 +1,12 @@
 #version 330 core
 out vec4 FragColor;
 
-in vec2 texCoord;
 in vec4 shadowCoord;
 
 uniform sampler2D gFragData[4];
 uniform sampler2D gLightVec;
 uniform sampler2D gEyeVec;
 uniform sampler2D shadowMap;
-uniform sampler2D tex;
-uniform sampler2D normalTex;
 uniform mat4 ShadowMatrix;
 
 uniform vec3 lightPos;
@@ -21,22 +18,7 @@ uniform vec3 Ambient;
 
 uniform vec3 sceneLightPos;
 uniform vec3 sceneEye;
-uniform int objectId;
-uniform bool hasTexture;
 
-// These definitions agree with the ObjectIds enum in scene.h
-const int     nullId	= 0;
-const int     skyId	= 1;
-const int     seaId	= 2;
-const int     groundId	= 3;
-const int     roomId	= 4;
-const int     boxId	= 5;
-const int     frameId	= 6;
-const int     lPicId	= 7;
-const int     rPicId	= 8;
-const int     teapotId	= 9;
-const int     spheresId	= 10;
-const int     floorId	= 11;
 const float PI = 3.14159265359;
 
 vec3 SchlickFresnel(float cosAngle, vec3 Ks)
@@ -77,7 +59,7 @@ bool PixelInShadow(vec3 FragPos, vec3 lightVec, vec3 Normal)
 	float pixelDepth;
 	vec2 shadowIndex = fragPosLightSpace.xy / fragPosLightSpace.w;
 	bool isShadowed = false;
-	float bias = max(0.05 * (1.0 - dot(Normal, lightVec)), 0.005);
+	float bias = max(0.005 * (1.0 - dot(Normal, lightVec)), 0.0005);
 
 	if (fragPosLightSpace.w > 0 && ((shadowIndex.x > 0 && shadowIndex.x < 1) && (shadowIndex.y > 0 && shadowIndex.y < 1)))
 	{
@@ -104,9 +86,11 @@ void main()
 	vec3 lightVec = texture(gLightVec, uv).rgb;
 	vec3 eyeVec = texture(gEyeVec, uv).rgb;
 
-	vec3 N = normalize(Normal);
+	// Leaving this here for if we want to pass light and eye vectors directly
 	//vec3 L = normalize(sceneLightPos - FragPos);
 	//vec3 V = normalize(sceneEye - FragPos);
+
+	vec3 N = normalize(Normal); // Should probably just assign N to fragData[1]
 	vec3 L = normalize(lightVec);
 	vec3 V = normalize(eyeVec);
 	vec3 H = normalize(L + V);
@@ -118,27 +102,8 @@ void main()
 	float HV = max(dot(H,V), 0.0);
 
 	float roughness = sqrt(2 / (Shininess + 2)); //conversion from phong to GGX
-
-	////// Object Ids If block ///////
-
-	if (objectId==groundId) 
-	{
-		uv = texCoord * 100.0;
-	}
-
-	/////////////////////////////////
 	
-	vec3 kD;
-
-	if (hasTexture) 
-	{
-		kD = texture(tex, uv).xyz;
-	}
-	else
-	{
-		kD = Diffuse;
-	}
-
+	vec3 kD = Diffuse;
 	vec3 Fd = kD / PI;
 
 	float D = DistributionGGX(HN, roughness);
@@ -150,7 +115,7 @@ void main()
 	vec3 directLight = totalBRDF * lightColor * LN;
 	vec3 ambient = Ambient * kD;
 
-	if (PixelInShadow(FragPos, lightVec, Normal)) {
+	if (PixelInShadow(FragPos, L, N)) {
 		FragColor = vec4(ambient, 1.0);
 	} else {
 		FragColor = vec4(directLight + ambient, 1.0);	

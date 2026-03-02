@@ -4,13 +4,13 @@ layout (location = 2) in vec2 vertexTexture;
 
 uniform mat4 ModelTr, ShadowMatrix;
 
-out vec2 TexCoords;
+out vec2 texCoord;
 out vec4 shadowCoord;
 
 void main()
 {
 	shadowCoord = ShadowMatrix * ModelTr * vec4(vertex, 1.0);
 
-    TexCoords = vertexTexture;
+    texCoord = vertexTexture;
     gl_Position = vec4(vertex.x, vertex.y, 0.0, 1.0); 
 }

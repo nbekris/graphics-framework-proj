@@ -150,23 +150,24 @@
     <ClInclude Include="transform.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="deferredLight.frag" />
-    <None Include="deferredLight.vert" />
-    <None Include="final.frag" />
-    <None Include="final.vert" />
-    <None Include="gBuffer.frag" />
-    <None Include="gBuffer.vert" />
-    <None Include="glsl deferredLight.frag" />
-    <None Include="lighting.frag" />
-    <None Include="lighting.vert" />
     <None Include="Makefile" />
-    <None Include="reflectionBottom.frag" />
-    <None Include="reflectionBottom.vert" />
-    <None Include="reflection.frag" />
-    <None Include="reflection.vert" />
     <None Include="room.ply" />
-    <None Include="shadow.frag" />
-    <None Include="shadow.vert" />
+    <None Include="shaders\deferredLight.frag" />
+    <None Include="shaders\deferredLight.vert" />
+    <None Include="shaders\final.frag" />
+    <None Include="shaders\final.vert" />
+    <None Include="shaders\gBuffer.frag" />
+    <None Include="shaders\gBuffer.vert" />
+    <None Include="shaders\lighting.frag" />
+    <None Include="shaders\lighting.vert" />
+    <None Include="shaders\localLights.frag" />
+    <None Include="shaders\localLights.vert" />
+    <None Include="shaders\reflection.frag" />
+    <None Include="shaders\reflection.vert" />
+    <None Include="shaders\reflectionBottom.frag" />
+    <None Include="shaders\reflectionBottom.vert" />
+    <None Include="shaders\shadow.frag" />
+    <None Include="shaders\shadow.vert" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

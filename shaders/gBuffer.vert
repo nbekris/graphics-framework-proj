@@ -2,10 +2,12 @@
 layout (location = 0) in vec4 vertex;
 layout (location = 1) in vec3 vertexNormal;
 layout (location = 2) in vec2 vertexTexture;
+layout (location = 3) in vec3 vertexTangent;
 
 out vec3 worldPos;
-out vec2 TexCoords;
+out vec2 texCoord;
 out vec3 Normal;
+out vec3 tanVec;
 
 out vec3 lightVec, eyeVec;
 
@@ -21,8 +23,9 @@ void main()
     // Calculate World Position
     worldPos = (ModelTr*vertex).xyz;
     
-    TexCoords = vertexTexture;
-    
+    texCoord = vertexTexture;
+    tanVec = mat3(ModelTr) * vertexTangent;
+  
     Normal = vertexNormal * mat3(NormalTr);
     //Normal = mat3(NormalTr) * vertexNormal;
 

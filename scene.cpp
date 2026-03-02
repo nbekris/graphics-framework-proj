@@ -240,30 +240,31 @@ void Scene::InitializeScene()
     
 	// Create Deferred Rendering shader program
     gBufferProgram = new ShaderProgram();
-	gBufferProgram->AddShader("gBuffer.vert", GL_VERTEX_SHADER);
-	gBufferProgram->AddShader("gBuffer.frag", GL_FRAGMENT_SHADER);
+	gBufferProgram->AddShader("shaders/gBuffer.vert", GL_VERTEX_SHADER);
+	gBufferProgram->AddShader("shaders/gBuffer.frag", GL_FRAGMENT_SHADER);
 	glBindAttribLocation(gBufferProgram->programId, 0, "vertex");
 	glBindAttribLocation(gBufferProgram->programId, 1, "vertexNormal");
 	glBindAttribLocation(gBufferProgram->programId, 2, "vertexTexture");
+    glBindAttribLocation(gBufferProgram->programId, 3, "vertexTangent");
 	gBufferProgram->LinkProgram();
 
 	deferredLightProgram = new ShaderProgram();
-	deferredLightProgram->AddShader("deferredLight.vert", GL_VERTEX_SHADER);
-	deferredLightProgram->AddShader("deferredLight.frag", GL_FRAGMENT_SHADER);
+	deferredLightProgram->AddShader("shaders/deferredLight.vert", GL_VERTEX_SHADER);
+	deferredLightProgram->AddShader("shaders/deferredLight.frag", GL_FRAGMENT_SHADER);
 	glBindAttribLocation(deferredLightProgram->programId, 0, "vertex");
 	glBindAttribLocation(deferredLightProgram->programId, 2, "vertexTexture");
 	deferredLightProgram->LinkProgram();
 
     localLightsProgram = new ShaderProgram();
-    localLightsProgram->AddShader("localLights.vert", GL_VERTEX_SHADER);
-    localLightsProgram->AddShader("localLights.frag", GL_FRAGMENT_SHADER);
+    localLightsProgram->AddShader("shaders/localLights.vert", GL_VERTEX_SHADER);
+    localLightsProgram->AddShader("shaders/localLights.frag", GL_FRAGMENT_SHADER);
     glBindAttribLocation(localLightsProgram->programId, 0, "vertex");
     localLightsProgram->LinkProgram();
 
 	// Shadow Map Shader Program Initialization
     shadowProgram = new ShaderProgram();
-    shadowProgram->AddShader("shadow.frag", GL_FRAGMENT_SHADER);
-    shadowProgram->AddShader("shadow.vert", GL_VERTEX_SHADER);
+    shadowProgram->AddShader("shaders/shadow.frag", GL_FRAGMENT_SHADER);
+    shadowProgram->AddShader("shaders/shadow.vert", GL_VERTEX_SHADER);
     glBindAttribLocation(shadowProgram->programId, 0, "vertex");
     glBindAttribLocation(shadowProgram->programId, 1, "vertexNormal");
     glBindAttribLocation(shadowProgram->programId, 2, "vertexTexture");
@@ -314,7 +315,7 @@ void Scene::InitializeScene()
     Texture* floorTexture = new Texture("textures/6670-diffuse.jpg");
     Texture* teapotTexture = new Texture("textures/cracks.png");
     Texture* podiumTexture = new Texture("textures/Brazilian_rosewood_pxr128.png");
-    Texture* groundTexture = new Texture("textures/grass.jpg");
+    Texture* groundTexture = new Texture("textures/Sport-Grass.jpg");
     Texture* rightFrameTexture = new Texture("textures/my-house-01.png");
     Texture* skyTexture = new Texture("skys/Ocean.png");
 
@@ -694,7 +695,7 @@ void Scene::CreateShader()
     deferredLightProgram->UnuseShader();
 
     // -----------------------------------------------------------------
-    // PASS 3: Local Lights Pass
+    // Local Lights Pass
     // Render many local lights
     // -----------------------------------------------------------------
 
