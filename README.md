@@ -74,10 +74,4 @@ The project utilizes the **Blinn-Phong** algorithm, with calculations performed 
 * 
 [LearnOpenGL: Deferred Shading](https://learnopengl.com/Advanced-Lighting/Deferred-Shading) 
 
-
-
 **Author:** Niko Bekris 
-
-**Course:** CS 562, Spring 2026 
-
-Would you like me to generate a C++ header file for the `GBufferFbo` class mentioned in this report?
