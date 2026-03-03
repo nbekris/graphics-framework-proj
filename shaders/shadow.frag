@@ -9,6 +9,12 @@ in vec4 vPosition;
 
 void main()
 {
-	FragColor = vPosition;
-	//FragColor.xyz = vec3(vPosition.w / 100);
+	float z = vPosition.z;
+
+	float z1 = z;
+	float z2 = z * z;
+	float z3 = z2 * z;
+	float z4 = z2 * z2;
+
+	FragColor = vec4(z1, z2, z3, z4);
 }
