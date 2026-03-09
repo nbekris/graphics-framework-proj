@@ -9,6 +9,7 @@ in vec4 vPosition;
 
 void main()
 {
+	//FragColor = vPosition;
 	float z = vPosition.z;
 
 	float z1 = z;
