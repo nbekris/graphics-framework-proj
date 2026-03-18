@@ -8,6 +8,7 @@ uniform sampler2D gFragData[4];
 uniform sampler2D gLightVec;
 uniform sampler2D gEyeVec;
 uniform sampler2D shadowMap;
+uniform sampler2D preBlurShadowMap;
 uniform mat4 ShadowMatrix;
 
 uniform vec3 lightPos;
@@ -156,6 +157,12 @@ float Hamburger4MSM(vec4 b, float zf)
     }
 }
 
+// Light bleeding reduction: remaps [threshold, 1] to [0, 1]
+float linstep(float lo, float hi, float v)
+{
+    return clamp((v - lo) / (hi - lo), 0.0, 1.0);
+}
+
 float CalculateShadowMSM(vec3 FragPos, vec3 Normal, vec3 L)
 {
     // Normal offset bias to reduce shadow acne
@@ -184,6 +191,9 @@ float CalculateShadowMSM(vec3 FragPos, vec3 Normal, vec3 L)
 
     // Run Hamburger 4MSM algorithm
     float G = Hamburger4MSM(moments, zf);
+
+    // Light bleeding reduction: crush low shadow values to zero
+    G = linstep(0.4, 1.0, G);
 
     return G;
 }
@@ -230,6 +240,86 @@ void main()
 	// MSM shadow: G is shadow intensity (0=lit, 1=shadowed)
 	// Lighting = ambient + (1-G) * [diffuse + specular]
 	float G_shadow = CalculateShadowMSM(FragPos, N, L);
+
+	if (viewMode == 1)
+	{
+		// Debug: visualize shadow intensity (black=lit, white=shadowed)
+		FragColor = vec4(vec3(G_shadow), 1.0);
+		return;
+	}
+	else if (viewMode >= 2 && viewMode <= 5)
+	{
+		// Debug: visualize shadow map moments from light's perspective
+		// Project fragment into light space to get shadow UV
+		vec4 fragPosLightSpace = ShadowMatrix * vec4(FragPos, 1.0);
+		vec2 shadowUV = fragPosLightSpace.xy / fragPosLightSpace.w;
+
+		if (fragPosLightSpace.w > 0.0 &&
+			shadowUV.x >= 0.0 && shadowUV.x <= 1.0 &&
+			shadowUV.y >= 0.0 && shadowUV.y <= 1.0)
+		{
+			vec4 moments = texture(shadowMap, shadowUV);
+			float val = 0.0;
+			if (viewMode == 2) val = moments.r; // z
+			else if (viewMode == 3) val = moments.g; // z^2
+			else if (viewMode == 4) val = moments.b; // z^3
+			else if (viewMode == 5) val = moments.a; // z^4
+			FragColor = vec4(vec3(val), 1.0);
+		}
+		else
+		{
+			FragColor = vec4(0.0, 0.0, 0.0, 1.0); // Outside shadow map
+		}
+		return;
+	}
+	else if (viewMode == 6)
+	{
+		// Debug: pre-blur moments (z channel only)
+		vec4 fragPosLightSpace = ShadowMatrix * vec4(FragPos, 1.0);
+		vec2 shadowUV = fragPosLightSpace.xy / fragPosLightSpace.w;
+
+		if (fragPosLightSpace.w > 0.0 &&
+			shadowUV.x >= 0.0 && shadowUV.x <= 1.0 &&
+			shadowUV.y >= 0.0 && shadowUV.y <= 1.0)
+		{
+			float val = texture(preBlurShadowMap, shadowUV).r;
+			FragColor = vec4(vec3(val), 1.0);
+		}
+		else
+		{
+			FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+		}
+		return;
+	}
+	else if (viewMode == 7)
+	{
+		// Debug: split-screen comparison (left=pre-blur, right=post-blur)
+		vec4 fragPosLightSpace = ShadowMatrix * vec4(FragPos, 1.0);
+		vec2 shadowUV = fragPosLightSpace.xy / fragPosLightSpace.w;
+		vec2 uv2 = gl_FragCoord.xy / vec2(width, height);
+
+		if (fragPosLightSpace.w > 0.0 &&
+			shadowUV.x >= 0.0 && shadowUV.x <= 1.0 &&
+			shadowUV.y >= 0.0 && shadowUV.y <= 1.0)
+		{
+			float val;
+			if (uv2.x < 0.5)
+				val = texture(preBlurShadowMap, shadowUV).r; // Left: pre-blur
+			else
+				val = texture(shadowMap, shadowUV).r;        // Right: post-blur
+
+			FragColor = vec4(vec3(val), 1.0);
+
+			// Draw a thin white divider line at the center
+			if (abs(uv2.x - 0.5) < 0.002)
+				FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+		}
+		else
+		{
+			FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+		}
+		return;
+	}
 
 	FragColor = vec4(ambient + (1.0 - G_shadow) * directLight, 1.0);
 }

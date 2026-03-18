@@ -64,8 +64,9 @@ std::vector<float> lightRanges;
 std::vector<float> Weights;
 GLuint Bindpoint = 0;
 GLuint scratchpadTextureID;
-GLuint SHADOW_WIDTH = 4096;
-GLuint SHADOW_HEIGHT = 4096;
+GLuint preBlurTextureID; // Debug: copy of shadow map before blur
+GLuint SHADOW_WIDTH = 2048;
+GLuint SHADOW_HEIGHT = 2048;
 
 HDR* skyIrrMap;
 
@@ -240,7 +241,7 @@ void Scene::InitializeScene()
         NULL,
         NULL);
 
-    shadowFbo.CreateFBO(4096, 4096);
+    shadowFbo.CreateFBO(SHADOW_WIDTH, SHADOW_HEIGHT);
 	reflectionTopFbo.CreateFBO(1024, 1024);
 	reflectionBottomFbo.CreateFBO(1024, 1024);
 	gBufferFbo.CreateGBuffer(750, 750);
@@ -292,9 +293,18 @@ void Scene::InitializeScene()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (int)GL_CLAMP_TO_EDGE);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    // Blur kernel weights: symmetric 9-tap Gaussian (blurWidth = 4)
-    Weights = { 0.016216f, 0.054054f, 0.1216216f, 0.1945946f, 0.227027f,
-                0.1945946f, 0.1216216f, 0.054054f, 0.016216f };
+    // Debug: pre-blur copy of shadow map (same size/format)
+    glGenTextures(1, &preBlurTextureID);
+    glBindTexture(GL_TEXTURE_2D, preBlurTextureID);
+    glTexImage2D(GL_TEXTURE_2D, 0, (int)GL_RGBA32F, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_RGBA, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (int)GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (int)GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (int)GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (int)GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // Blur kernel weights: symmetric 3-tap Gaussian (blurWidth = 1)
+    Weights = { 0.25f, 0.5f, 0.25f };
 
     // Upload as UBO with std140 padding (each float padded to 16 bytes = vec4)
     GLuint bufferID;
@@ -451,10 +461,15 @@ void Scene::DrawMenu()
         // variable named "mode" in the application, and sent to the
         // shader to be used as you wish.
         if (ImGui::BeginMenu("Menu ")) {
-            if (ImGui::MenuItem("<sample menu of choices>", "",	false, false)) {}
-            if (ImGui::MenuItem("Do nothing 0", "",		mode==0)) { mode=0; }
-            if (ImGui::MenuItem("Do nothing 1", "",		mode==1)) { mode=1; }
-            if (ImGui::MenuItem("Do nothing 2", "",		mode==2)) { mode=2; }
+            if (ImGui::MenuItem("<debug views>", "",	false, false)) {}
+            if (ImGui::MenuItem("Normal Rendering", "",		mode==0)) { mode=0; }
+            if (ImGui::MenuItem("Shadow Map (G_shadow)", "",		mode==1)) { mode=1; }
+            if (ImGui::MenuItem("Shadow Moments (z)", "",		mode==2)) { mode=2; }
+            if (ImGui::MenuItem("Shadow Moments (z^2)", "",		mode==3)) { mode=3; }
+            if (ImGui::MenuItem("Shadow Moments (z^3)", "",		mode==4)) { mode=4; }
+            if (ImGui::MenuItem("Shadow Moments (z^4)", "",		mode==5)) { mode=5; }
+            if (ImGui::MenuItem("Pre-Blur Moments (z)", "",		mode==6)) { mode=6; }
+            if (ImGui::MenuItem("Blur Comparison (split)", "",		mode==7)) { mode=7; }
             ImGui::EndMenu(); }
         
         ImGui::EndMainMenuBar(); }
@@ -605,7 +620,7 @@ void Scene::CreateShader()
    ShadowView = LookAt(lightPos, glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 0.0, 1.0));
    ShadowProj = Perspective(40 / lightDist, 40 / lightDist, front, back);
 
-   glViewport(0, 0, 4096, 4096);
+   glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
    // Clear to (1,1,1,1) = relative depth of 1.0 (far plane, no occluder)
    glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -629,6 +644,11 @@ void Scene::CreateShader()
    shadowFbo.UnbindFBO();
    shadowProgram->UnuseShader();
 
+   // Debug: save a copy of the unblurred shadow map
+   glCopyImageSubData(shadowFbo.textureID, GL_TEXTURE_2D, 0, 0, 0, 0,
+                      preBlurTextureID,     GL_TEXTURE_2D, 0, 0, 0, 0,
+                      SHADOW_WIDTH, SHADOW_HEIGHT, 1);
+
    // -----------------------------------------------------------------
    // Compute Shader Pass - Gaussian blur on moment shadow map
    // -----------------------------------------------------------------
@@ -640,7 +660,7 @@ void Scene::CreateShader()
    loc = glGetUniformBlockIndex(programId, "blurKernel");
    glUniformBlockBinding(programId, loc, Bindpoint);
 
-   glUniform1i(glGetUniformLocation(programId, "blurWidth"), 4);
+   glUniform1i(glGetUniformLocation(programId, "blurWidth"), 1);
 
    // --- Horizontal blur: shadow FBO -> scratchpad ---
    glBindImageTexture(0, shadowFbo.textureID, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
@@ -726,6 +746,12 @@ void Scene::CreateShader()
 
     shadowFbo.BindTexture(8, programId, "shadowMap");
 
+    // Bind pre-blur shadow map for debug visualization
+    glActiveTexture(GL_TEXTURE9);
+    glBindTexture(GL_TEXTURE_2D, preBlurTextureID);
+    loc = glGetUniformLocation(programId, "preBlurShadowMap");
+    glUniform1i(loc, 9);
+
     // Shadow matrix with bias (maps NDC [-1,1] to [0,1] for texture lookup)
     const glm::mat4 B = Translate(0.5f, 0.5f, 0.5f) * Scale(0.5f, 0.5f, 0.5f);
     ShadowMatrix = B * ShadowProj * ShadowView;
@@ -743,7 +769,7 @@ void Scene::CreateShader()
     glUniform3fv(loc, 1, &(Ambient[0]));
 
     loc = glGetUniformLocation(programId, "viewMode");
-    glUniform1i(loc, 0);
+    glUniform1i(loc, mode);
 
     loc = glGetUniformLocation(programId, "lightPos");
     glUniform3fv(loc, 1, &lightPos[0]);
@@ -773,10 +799,12 @@ void Scene::CreateShader()
 
     gBufferFbo.UnbindGBufferTextures(2);
 	shadowFbo.UnbindTexture(8);
+    glActiveTexture(GL_TEXTURE9);
+    glBindTexture(GL_TEXTURE_2D, 0);
     deferredLightProgram->UnuseShader();
 
     // -----------------------------------------------------------------
-    // PASS 3: Local Lights Pass
+    // Local Lights Pass
     // Render many local lights
     // -----------------------------------------------------------------
 
