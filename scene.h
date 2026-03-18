@@ -91,6 +91,7 @@ public:
 	ShaderProgram* gBufferProgram;
     ShaderProgram* deferredLightProgram;
     ShaderProgram* localLightsProgram;
+    ShaderProgram* computeBlurShader;
 
     // Options menu stuff
     bool show_demo_window;

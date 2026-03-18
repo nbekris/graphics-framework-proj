@@ -60,6 +60,13 @@ std::vector<glm::vec3> lightPositions;
 std::vector<glm::vec3> lightColors;
 std::vector<float> lightRanges;
 
+// Compute shader for Gaussian blur
+std::vector<float> Weights;
+GLuint Bindpoint = 0;
+GLuint scratchpadTextureID;
+GLuint SHADOW_WIDTH = 4096;
+GLuint SHADOW_HEIGHT = 4096;
+
 HDR* skyIrrMap;
 
 const float grndSize = 100.0;    // Island radius;  Minimum about 20;  Maximum 1000 or so
@@ -270,10 +277,42 @@ void Scene::InitializeScene()
     glBindAttribLocation(shadowProgram->programId, 3, "vertexTangent");
     shadowProgram->LinkProgram();
 
-    // Create the lighting shader program from source code files.
-    // @@ Initialize additional shaders if necessary
+    // Compute Blur Shader Program
+    computeBlurShader = new ShaderProgram();
+    computeBlurShader->AddShader("blur.comp", GL_COMPUTE_SHADER);
+    computeBlurShader->LinkProgram();
 
-    
+    // Scratchpad texture for ping-pong blur (same size/format as shadow FBO)
+    glGenTextures(1, &scratchpadTextureID);
+    glBindTexture(GL_TEXTURE_2D, scratchpadTextureID);
+    glTexImage2D(GL_TEXTURE_2D, 0, (int)GL_RGBA32F, SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_RGBA, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (int)GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (int)GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (int)GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (int)GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // Blur kernel weights: symmetric 9-tap Gaussian (blurWidth = 4)
+    Weights = { 0.016216f, 0.054054f, 0.1216216f, 0.1945946f, 0.227027f,
+                0.1945946f, 0.1216216f, 0.054054f, 0.016216f };
+
+    // Upload as UBO with std140 padding (each float padded to 16 bytes = vec4)
+    GLuint bufferID;
+    glGenBuffers(1, &bufferID);
+    Bindpoint = 0;
+
+    std::vector<float> paddedWeights;
+    for (float w : Weights) {
+        paddedWeights.push_back(w);
+        paddedWeights.push_back(0.0f);
+        paddedWeights.push_back(0.0f);
+        paddedWeights.push_back(0.0f);
+    }
+
+    glBindBuffer(GL_UNIFORM_BUFFER, bufferID);
+    glBufferData(GL_UNIFORM_BUFFER, paddedWeights.size() * sizeof(float), paddedWeights.data(), GL_STATIC_DRAW);
+    glBindBufferBase(GL_UNIFORM_BUFFER, Bindpoint, bufferID);
+
     // Create all the Polygon shapes
     proceduralground = new ProceduralGround(grndSize, 400,
                                      grndOctaves, grndFreq, grndPersistence,
@@ -543,6 +582,10 @@ void Scene::CreateShader()
     CHECKERROR;
     int loc, programId;
 
+    // Relative depth bounds for MSM (used in shadow and lighting passes)
+    float shadowZ0 = front;
+    float shadowZ1 = lightDist + 200.0f;
+
     // Set Light
    glm::vec3 Light(3, 3, 3);
    glm::vec3 Ambient(0.4, 0.4, 0.4);
@@ -550,8 +593,8 @@ void Scene::CreateShader()
    eye = glm::vec3(WorldInverse * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
 
    // -----------------------------------------------------------------
-    // Shadow Pass
-    // Create Shadow Map
+    // Shadow Pass - Generate moment shadow map
+    // Stores (z, z^2, z^3, z^4) with relative depth
     // -----------------------------------------------------------------
 
    shadowProgram->UseShader();
@@ -562,17 +605,20 @@ void Scene::CreateShader()
    ShadowView = LookAt(lightPos, glm::vec3(0.0, 0.0, 0.0), glm::vec3(0.0, 0.0, 1.0));
    ShadowProj = Perspective(40 / lightDist, 40 / lightDist, front, back);
 
-   // We clear to black (0,0,0) so empty space has no position/normal data
    glViewport(0, 0, 4096, 4096);
-   glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+   // Clear to (1,1,1,1) = relative depth of 1.0 (far plane, no occluder)
+   glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
    loc = glGetUniformLocation(programId, "ProjectionMatrix");
    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowProj));
    loc = glGetUniformLocation(programId, "ViewMatrix");
    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowView));
+   loc = glGetUniformLocation(programId, "z0");
+   glUniform1f(loc, shadowZ0);
+   loc = glGetUniformLocation(programId, "z1");
+   glUniform1f(loc, shadowZ1);
 
-   // Draw all objects (This recursively traverses the object hierarchy.)
    CHECKERROR;
    glEnable(GL_CULL_FACE);
    glCullFace(GL_FRONT);
@@ -580,9 +626,43 @@ void Scene::CreateShader()
    glDisable(GL_CULL_FACE);
    CHECKERROR;
 
-   // Turn off the shader
    shadowFbo.UnbindFBO();
    shadowProgram->UnuseShader();
+
+   // -----------------------------------------------------------------
+   // Compute Shader Pass - Gaussian blur on moment shadow map
+   // -----------------------------------------------------------------
+
+   computeBlurShader->UseShader();
+   programId = computeBlurShader->programId;
+
+   // Bind UBO
+   loc = glGetUniformBlockIndex(programId, "blurKernel");
+   glUniformBlockBinding(programId, loc, Bindpoint);
+
+   glUniform1i(glGetUniformLocation(programId, "blurWidth"), 4);
+
+   // --- Horizontal blur: shadow FBO -> scratchpad ---
+   glBindImageTexture(0, shadowFbo.textureID, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+   glUniform1i(glGetUniformLocation(programId, "src"), 0);
+   glBindImageTexture(1, scratchpadTextureID, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+   glUniform1i(glGetUniformLocation(programId, "dst"), 1);
+   glUniform2i(glGetUniformLocation(programId, "blurDirection"), 1, 0);
+
+   glDispatchCompute((SHADOW_WIDTH + 127) / 128, SHADOW_HEIGHT, 1);
+   glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+
+   // --- Vertical blur: scratchpad -> shadow FBO ---
+   glBindImageTexture(0, scratchpadTextureID, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+   glUniform1i(glGetUniformLocation(programId, "src"), 0);
+   glBindImageTexture(1, shadowFbo.textureID, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+   glUniform1i(glGetUniformLocation(programId, "dst"), 1);
+   glUniform2i(glGetUniformLocation(programId, "blurDirection"), 0, 1);
+
+   glDispatchCompute((SHADOW_WIDTH + 127) / 128, SHADOW_HEIGHT, 1);
+   glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+
+   computeBlurShader->UnuseShader();
 
     // -----------------------------------------------------------------
     // G Buffer Pass
@@ -646,11 +726,18 @@ void Scene::CreateShader()
 
     shadowFbo.BindTexture(8, programId, "shadowMap");
 
+    // Shadow matrix with bias (maps NDC [-1,1] to [0,1] for texture lookup)
     const glm::mat4 B = Translate(0.5f, 0.5f, 0.5f) * Scale(0.5f, 0.5f, 0.5f);
-	ShadowMatrix = B * ShadowProj * ShadowView;
+    ShadowMatrix = B * ShadowProj * ShadowView;
 
     loc = glGetUniformLocation(programId, "ShadowMatrix");
     glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowMatrix));
+
+    // Pass relative depth bounds (must match shadow pass)
+    loc = glGetUniformLocation(programId, "z0");
+    glUniform1f(loc, shadowZ0);
+    loc = glGetUniformLocation(programId, "z1");
+    glUniform1f(loc, shadowZ1);
 
     loc = glGetUniformLocation(programId, "Ambient");
     glUniform3fv(loc, 1, &(Ambient[0]));
@@ -658,16 +745,13 @@ void Scene::CreateShader()
     loc = glGetUniformLocation(programId, "viewMode");
     glUniform1i(loc, 0);
 
-    // Set Light Position
     loc = glGetUniformLocation(programId, "lightPos");
-    glUniform3fv(loc, 1, &lightPos[0]); // Ensure this variable exists in your class!
+    glUniform3fv(loc, 1, &lightPos[0]);
 
-    // Set Light Color
     glm::vec3 debugLightColor(1.0, 1.0, 1.0);
     loc = glGetUniformLocation(programId, "lightColor");
     glUniform3fv(loc, 1, &debugLightColor[0]);
 
-    // Set View Position (Needed for Specular)
     loc = glGetUniformLocation(programId, "viewPos");
     glUniform3fv(loc, 1, &eye[0]);
 
@@ -677,11 +761,9 @@ void Scene::CreateShader()
     loc = glGetUniformLocation(programId, "height");
     glUniform1f(loc, height);
 
-    // Set Light Position
     loc = glGetUniformLocation(programId, "sceneLightPos");
-    glUniform3fv(loc, 1, &lightPos[0]); // Ensure this variable exists in your class!
+    glUniform3fv(loc, 1, &lightPos[0]);
 
-    // Set View Position
     loc = glGetUniformLocation(programId, "sceneEye");
     glUniform3fv(loc, 1, &eye[0]);
 
@@ -690,7 +772,7 @@ void Scene::CreateShader()
     CHECKERROR;
 
     gBufferFbo.UnbindGBufferTextures(2);
-	shadowFbo.UnbindTexture(6);
+	shadowFbo.UnbindTexture(8);
     deferredLightProgram->UnuseShader();
 
     // -----------------------------------------------------------------

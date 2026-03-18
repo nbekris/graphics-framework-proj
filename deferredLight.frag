@@ -20,6 +20,10 @@ uniform vec3 Ambient;
 uniform vec3 sceneLightPos;
 uniform vec3 sceneEye;
 
+// Relative depth range (same values used in shadow.frag)
+uniform float z0;
+uniform float z1;
+
 const float PI = 3.14159265359;
 
 vec3 SchlickFresnel(float cosAngle, vec3 Ks)
@@ -31,73 +35,174 @@ float DistributionGGX(float HN, float roughness)
 {
 	float a2 = pow(roughness, 2.0);
 	float NH2 = pow(HN, 2.0);
-	
+
 	float denominator = PI * pow(NH2 * (a2 - 1) + 1, 2.0);
-	
+
 	return a2 / denominator;
 }
 
 float G1GGXSchlick(float NV, float roughness)
 {
-//	float k = pow(roughness, 2.0) / 2.0; IBL calculation
-//	return NV / (NV * (1 - k) + k);
     float r = roughness + 1.0;
-    float k = (r * r) / 8.0; 
-    
+    float k = (r * r) / 8.0;
+
     return NV / (NV * (1.0 - k) + k);
 }
 
-float SmithMethod(float VN, float LN, float roughness) 
+float SmithMethod(float VN, float LN, float roughness)
 {
 	return G1GGXSchlick(LN, roughness) * G1GGXSchlick(VN, roughness);
 }
 
-bool PixelInShadow(vec3 FragPos, vec3 lightVec, vec3 Normal)
+// ---------------------------------------------------------------
+// Hamburger 4MSM (Algorithm 3 from the MSM paper)
+// Uses Cholesky decomposition to solve the 3x3 Hankel system.
+//
+// Input:  b = (z, z^2, z^3, z^4) from blurred shadow map
+//         zf = fragment depth (relative depth)
+// Output: G = shadow intensity (0 = lit, 1 = shadowed)
+//
+// Final lighting uses: ambient + (1-G) * [diffuse + specular]
+// ---------------------------------------------------------------
+float Hamburger4MSM(vec4 b, float zf)
 {
-	vec4 fragPosLightSpace = ShadowMatrix * vec4(FragPos, 1.0);
-	//vec4 fragPosLightSpace = shadowCoord;
+    // Step 1: Bias moments toward 0.5 to prevent singularity
+    float alpha = 1.0e-3;
+    vec4 bp = (1.0 - alpha) * b + alpha * vec4(0.5);
 
-	float lightDepth;
-	float pixelDepth;
-	vec2 shadowIndex = fragPosLightSpace.xy / fragPosLightSpace.w;
-	bool isShadowed = false;
-	float bias = max(0.05 * (1.0 - dot(Normal, lightVec)), 0.005);
+    // Step 2: Build the 3x3 symmetric Hankel matrix and solve via Cholesky
+    //
+    //  | 1     bp.x  bp.y |   | c1 |   | 1    |
+    //  | bp.x  bp.y  bp.z | * | c2 | = | zf   |
+    //  | bp.y  bp.z  bp.w |   | c3 |   | zf^2 |
+    //
+    float m11 = 1.0;
+    float m12 = bp.x;
+    float m13 = bp.y;
+    float m22 = bp.y;
+    float m23 = bp.z;
+    float m33 = bp.w;
 
-	if (fragPosLightSpace.w > 0 && ((shadowIndex.x > 0 && shadowIndex.x < 1) && (shadowIndex.y > 0 && shadowIndex.y < 1)))
-	{
-		lightDepth = texture(shadowMap, shadowIndex).w;
-		pixelDepth = fragPosLightSpace.w;
+    float rhs1 = 1.0;
+    float rhs2 = zf;
+    float rhs3 = zf * zf;
 
-		isShadowed = pixelDepth - bias > lightDepth;
-	}
+    // Cholesky: M = L * L^T
+    // L = | a  0  0 |    L^T = | a  b_ch  c_ch |
+    //     | b  d  0 |          | 0  d      e    |
+    //     | c  e  f |          | 0  0      f    |
+    float a_ch = sqrt(max(m11, 1e-8));
+    float b_ch = m12 / a_ch;
+    float c_ch = m13 / a_ch;
+    float d_ch = sqrt(max(m22 - b_ch * b_ch, 1e-8));
+    float e_ch = (m23 - b_ch * c_ch) / d_ch;
+    float f_ch = sqrt(max(m33 - c_ch * c_ch - e_ch * e_ch, 1e-8));
 
-	return isShadowed;
+    // Forward substitution: L * chat = rhs
+    float chat1 = rhs1 / a_ch;
+    float chat2 = (rhs2 - b_ch * chat1) / d_ch;
+    float chat3 = (rhs3 - c_ch * chat1 - e_ch * chat2) / f_ch;
+
+    // Back substitution: L^T * c = chat
+    float c3 = chat3 / f_ch;
+    float c2 = (chat2 - e_ch * c3) / d_ch;
+    float c1 = (chat1 - b_ch * c2 - c_ch * c3) / a_ch;
+
+    // Step 3: Solve the quadratic c3*z^2 + c2*z + c1 = 0
+    float disc = c2 * c2 - 4.0 * c3 * c1;
+    disc = max(disc, 0.0); // Guard against negative discriminant
+    float sqrtDisc = sqrt(disc);
+
+    float z2, z3;
+    if (abs(c3) < 1e-6)
+    {
+        // Degenerate: linear equation c2*z + c1 = 0
+        z2 = -c1 / max(abs(c2), 1e-6);
+        z3 = z2;
+    }
+    else
+    {
+        z2 = (-c2 - sqrtDisc) / (2.0 * c3);
+        z3 = (-c2 + sqrtDisc) / (2.0 * c3);
+    }
+
+    // Ensure z2 <= z3
+    if (z2 > z3)
+    {
+        float tmp = z2;
+        z2 = z3;
+        z3 = tmp;
+    }
+
+    // Steps 4-6: Compute shadow intensity G
+    if (zf <= z2)
+    {
+        // Step 4: Fragment is in front of both roots => fully lit
+        return 0.0;
+    }
+    else if (zf <= z3)
+    {
+        // Step 5: Fragment between roots
+        float num = zf * z3 - bp.x * (zf + z3) + bp.y;
+        float den = (z3 - z2) * (zf - z2);
+        return max(num / max(abs(den), 1e-6), 0.0);
+    }
+    else
+    {
+        // Step 6: Fragment behind both roots
+        float num = z2 * z3 - bp.x * (z2 + z3) + bp.y;
+        float den = (zf - z2) * (zf - z3);
+        return max(1.0 - num / max(abs(den), 1e-6), 0.0);
+    }
+}
+
+float CalculateShadowMSM(vec3 FragPos, vec3 Normal, vec3 L)
+{
+    // Normal offset bias to reduce shadow acne
+    float offsetScale = max(0.005 * (1.0 - dot(Normal, L)), 0.0005);
+    vec3 biasedFragPos = FragPos + (Normal * offsetScale);
+
+    // Project into light's clip space (ShadowMatrix includes bias matrix B)
+    vec4 fragPosLightSpace = ShadowMatrix * vec4(biasedFragPos, 1.0);
+
+    // Texture coordinates in [0,1] (bias matrix maps NDC [-1,1] to [0,1])
+    vec2 shadowUV = fragPosLightSpace.xy / fragPosLightSpace.w;
+
+    // Bounds check
+    if (fragPosLightSpace.w <= 0.0 ||
+        shadowUV.x < 0.0 || shadowUV.x > 1.0 ||
+        shadowUV.y < 0.0 || shadowUV.y > 1.0)
+    {
+        return 0.0; // Outside shadow map => lit (G=0)
+    }
+
+    // Compute relative fragment depth (same transform as shadow.frag)
+    float zf = clamp((fragPosLightSpace.w - z0) / (z1 - z0), 0.0, 1.0);
+
+    // Sample blurred moments from shadow map
+    vec4 moments = texture(shadowMap, shadowUV);
+
+    // Run Hamburger 4MSM algorithm
+    float G = Hamburger4MSM(moments, zf);
+
+    return G;
 }
 
 void main()
-{       
+{
 	vec2 uv = gl_FragCoord.xy / vec2(width, height);
-//	FragColor.xyz = vec3(texture(shadowMap, uv).w / 100.0);
-//	return;
 
-	//vec2 uv = TexCoords;
-
-//	FragColor = vec4(1.0, 0.0, 0.0, 0.5);
-//	return;
-
-	// 1. Retrieve data
+	// Retrieve g buffer data
 	vec3 FragPos = texture(gFragData[0], uv).rgb;
 	vec3 Normal = texture(gFragData[1], uv).rgb;
-	vec3 Diffuse = texture(gFragData[2], uv).rgb; // diffuse ie Kd
-	vec3 Specular = texture(gFragData[3], uv).rgb; // specular ie Ks
-	float Shininess = texture(gFragData[3], uv).a; // alpha
+	vec3 Diffuse = texture(gFragData[2], uv).rgb;
+	vec3 Specular = texture(gFragData[3], uv).rgb;
+	float Shininess = texture(gFragData[3], uv).a;
 
 	vec3 lightVec = texture(gLightVec, uv).rgb;
 	vec3 eyeVec = texture(gEyeVec, uv).rgb;
 
 	vec3 N = normalize(Normal);
-	//vec3 L = normalize(sceneLightPos - FragPos);
-	//vec3 V = normalize(sceneEye - FragPos);
 	vec3 L = normalize(lightVec);
 	vec3 V = normalize(eyeVec);
 	vec3 H = normalize(L + V);
@@ -109,24 +214,22 @@ void main()
 	float HV = max(dot(H,V), 0.0);
 
 	float roughness = sqrt(2 / (Shininess + 2)); //conversion from phong to GGX
-	
+
 	vec3 kD = Diffuse;
 	vec3 Fd = kD / PI;
 
 	float D = DistributionGGX(HN, roughness);
-	float G = SmithMethod(VN, LN, roughness);
+	float G_brdf = SmithMethod(VN, LN, roughness);
 	vec3 F = SchlickFresnel(HV, Specular);
-	vec3 Fs = (F * G * D) / max(4.0 * LN * VN, 0.001);
+	vec3 Fs = (F * G_brdf * D) / max(4.0 * LN * VN, 0.001);
 
 	vec3 totalBRDF = Fd + Fs;
 	vec3 directLight = totalBRDF * lightColor * LN;
 	vec3 ambient = Ambient * kD;
 
-	if (PixelInShadow(FragPos, lightVec, Normal)) {
-		FragColor = vec4(ambient, 1.0);
-		//FragColor.xyz = vec3(1.0, 0.0, 0.0); // red for shadowed pixels
-	} else {
-		FragColor = vec4(directLight + ambient, 1.0);	
-	}
-	//FragColor.xyz = directLight + ambient;
+	// MSM shadow: G is shadow intensity (0=lit, 1=shadowed)
+	// Lighting = ambient + (1-G) * [diffuse + specular]
+	float G_shadow = CalculateShadowMSM(FragPos, N, L);
+
+	FragColor = vec4(ambient + (1.0 - G_shadow) * directLight, 1.0);
 }

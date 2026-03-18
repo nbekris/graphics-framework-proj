@@ -66,3 +66,6 @@ Thumbs.db # Windows thumbnail cache
 ## Custom folders to ignore
 Libraries/
 libs/
+
+## Claud
+.claude/

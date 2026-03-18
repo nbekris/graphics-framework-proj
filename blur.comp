@@ -1,0 +1,77 @@
+#version 430 core
+
+// Thread group size optimized for horizontal processing
+layout (local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+// std140 layout: each float is padded to 16 bytes (vec4)
+layout (std140, binding = 0) uniform blurKernel
+{
+    vec4 weights[101]; // Access actual float via weights[i].x
+};
+
+uniform int blurWidth;       // Radius of the blur (e.g., 4 for a 9-tap kernel)
+uniform ivec2 blurDirection; // (1, 0) for Horizontal, (0, 1) for Vertical
+
+// Image bindings
+layout (rgba32f, binding = 0) uniform readonly  image2D src;
+layout (rgba32f, binding = 1) uniform writeonly image2D dst;
+
+// Shared memory for the horizontal pass: 128 threads + apron on each side
+shared vec4 v[128 + 2 * 100];
+
+void main()
+{
+    ivec2 gpos = ivec2(gl_GlobalInvocationID.xy);
+    uint  lpos = gl_LocalInvocationIndex; // 0..127
+    ivec2 imgSize = imageSize(src);
+
+    // -----------------------------------------------------------------
+    // HORIZONTAL PASS (shared memory optimization)
+    // -----------------------------------------------------------------
+    if (blurDirection.x == 1)
+    {
+        // Load pixel shifted left by blurWidth into shared memory
+        ivec2 readPos = gpos - ivec2(blurWidth, 0);
+        v[lpos] = imageLoad(src, clamp(readPos, ivec2(0), imgSize - ivec2(1)));
+
+        // Load extra apron pixels at the end of the block
+        if (lpos < 2 * blurWidth)
+        {
+            ivec2 extraPos = gpos + ivec2(128 - blurWidth, 0);
+            v[lpos + 128] = imageLoad(src, clamp(extraPos, ivec2(0), imgSize - ivec2(1)));
+        }
+
+        barrier();
+
+        if (gpos.x >= imgSize.x || gpos.y >= imgSize.y) return;
+
+        // Convolution using shared memory
+        vec4 result = vec4(0.0);
+        for (int i = 0; i <= 2 * blurWidth; ++i)
+        {
+            result += v[lpos + i] * weights[i].x;
+        }
+
+        imageStore(dst, gpos, result);
+    }
+    // -----------------------------------------------------------------
+    // VERTICAL PASS (direct image load)
+    // -----------------------------------------------------------------
+    else
+    {
+        if (gpos.x >= imgSize.x || gpos.y >= imgSize.y) return;
+
+        vec4 result = vec4(0.0);
+
+        for (int i = -blurWidth; i <= blurWidth; ++i)
+        {
+            ivec2 offsetPos = gpos + ivec2(0, i);
+            vec4 pixelData = imageLoad(src, clamp(offsetPos, ivec2(0), imgSize - ivec2(1)));
+
+            // i + blurWidth shifts index from [-W, W] to [0, 2W]
+            result += pixelData * weights[i + blurWidth].x;
+        }
+
+        imageStore(dst, gpos, result);
+    }
+}
