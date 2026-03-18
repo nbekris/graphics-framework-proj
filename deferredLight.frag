@@ -67,16 +67,11 @@ float SmithMethod(float VN, float LN, float roughness)
 // ---------------------------------------------------------------
 float Hamburger4MSM(vec4 b, float zf)
 {
-    // Step 1: Bias moments toward 0.5 to prevent singularity
+    // Bias moments toward 0.5 to prevent singularity
     float alpha = 1.0e-3;
     vec4 bp = (1.0 - alpha) * b + alpha * vec4(0.5);
 
-    // Step 2: Build the 3x3 symmetric Hankel matrix and solve via Cholesky
-    //
-    //  | 1     bp.x  bp.y |   | c1 |   | 1    |
-    //  | bp.x  bp.y  bp.z | * | c2 | = | zf   |
-    //  | bp.y  bp.z  bp.w |   | c3 |   | zf^2 |
-    //
+    // Build the 3x3 symmetric Hankel matrix and solve via Cholesky
     float m11 = 1.0;
     float m12 = bp.x;
     float m13 = bp.y;
@@ -88,10 +83,6 @@ float Hamburger4MSM(vec4 b, float zf)
     float rhs2 = zf;
     float rhs3 = zf * zf;
 
-    // Cholesky: M = L * L^T
-    // L = | a  0  0 |    L^T = | a  b_ch  c_ch |
-    //     | b  d  0 |          | 0  d      e    |
-    //     | c  e  f |          | 0  0      f    |
     float a_ch = sqrt(max(m11, 1e-8));
     float b_ch = m12 / a_ch;
     float c_ch = m13 / a_ch;
@@ -109,7 +100,7 @@ float Hamburger4MSM(vec4 b, float zf)
     float c2 = (chat2 - e_ch * c3) / d_ch;
     float c1 = (chat1 - b_ch * c2 - c_ch * c3) / a_ch;
 
-    // Step 3: Solve the quadratic c3*z^2 + c2*z + c1 = 0
+    // Solve the quadratic c3*z^2 + c2*z + c1 = 0
     float disc = c2 * c2 - 4.0 * c3 * c1;
     disc = max(disc, 0.0); // Guard against negative discriminant
     float sqrtDisc = sqrt(disc);
@@ -135,10 +126,10 @@ float Hamburger4MSM(vec4 b, float zf)
         z3 = tmp;
     }
 
-    // Steps 4-6: Compute shadow intensity G
+    // Compute shadow intensity G
     if (zf <= z2)
     {
-        // Step 4: Fragment is in front of both roots => fully lit
+        // Fragment is in front of both roots => fully lit
         return 0.0;
     }
     else if (zf <= z3)
@@ -193,7 +184,7 @@ float CalculateShadowMSM(vec3 FragPos, vec3 Normal, vec3 L)
     float G = Hamburger4MSM(moments, zf);
 
     // Light bleeding reduction: crush low shadow values to zero
-    G = linstep(0.4, 1.0, G);
+    //G = linstep(0.4, 1.0, G);
 
     return G;
 }
@@ -321,5 +312,5 @@ void main()
 		return;
 	}
 
-	FragColor = vec4(ambient + (1.0 - G_shadow) * directLight, 1.0);
+	FragColor = vec4(ambient + linstep(0.4, 1.0, 1.0 - G_shadow) * directLight, 1.0);
 }

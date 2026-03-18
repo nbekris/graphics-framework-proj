@@ -3,8 +3,7 @@
 // Declares thread group size (Optimized for horizontal processing)
 layout (local_size_x = 128, local_size_y = 1, local_size_z = 1) in; 
 
-// FIX: std140 layout is mandatory for UBOs. 
-// We use vec4 to account for the forced 16-byte padding per array element.
+// Use vec4 to account for the forced 16-byte padding per array element.
 layout (std140, binding = 0) uniform blurKernel 
 {
     vec4 weights[101]; // We will access the actual float using weights[i].x
@@ -17,7 +16,6 @@ uniform ivec2 blurDirection; // (1, 0) for Horizontal, (0, 1) for Vertical
 layout (rgba32f, binding = 0) uniform readonly image2D src; 
 layout (rgba32f, binding = 1) uniform writeonly image2D dst; 
 
-// FIX: Shared memory must be vec4 to hold the 4 moments (z, z^2, z^3, z^4)
 // Size = 128 threads + max possible apron size (e.g., up to 100 on each side)
 shared vec4 v[128 + 101]; 
 
@@ -27,31 +25,30 @@ void main()
     uint lpos = gl_LocalInvocationIndex; // Local thread ID (0 to 127)
     ivec2 imgSize = imageSize(src);
 
-    // -----------------------------------------------------------------
-    // THE HORIZONTAL PASS (Using highly optimized shared memory)
-    // -----------------------------------------------------------------
+
+    // Horizontal Pass
     if (blurDirection.x == 1) 
     {
-        // 1. Calculate read position, shifted left by the blur radius
+        // Calculate read position, shifted left by the blur radius
         ivec2 readPos = gpos - ivec2(blurWidth, 0);
         
         // Clamp to prevent reading outside the texture boundaries
         v[lpos] = imageLoad(src, clamp(readPos, ivec2(0), imgSize - ivec2(1)));
 
-        // 2. Load the extra "apron" pixels at the end of the block
+        // Load the extra "apron" pixels at the end of the block
         if (lpos < 2 * blurWidth) 
         {
             ivec2 extraReadPos = gpos + ivec2(128 - blurWidth, 0);
             v[lpos + 128] = imageLoad(src, clamp(extraReadPos, ivec2(0), imgSize - ivec2(1)));
         }
 
-        // 3. Wait for all 128 threads to finish loading data into shared memory
+        // Wait for all 128 threads to finish loading data into shared memory
         barrier(); 
 
-        // 4. Bounds check before writing
+        // Bounds check before writing
         if (gpos.x >= imgSize.x || gpos.y >= imgSize.y) return;
 
-        // 5. Perform the convolution using shared memory
+        // Perform the convolution using shared memory
         vec4 result = vec4(0.0);
         for (int i = 0; i <= 2 * blurWidth; ++i) 
         {
@@ -62,9 +59,7 @@ void main()
         imageStore(dst, gpos, result);
     }
     
-    // -----------------------------------------------------------------
-    // THE VERTICAL PASS (Direct Image Load)
-    // -----------------------------------------------------------------
+    // Vertical Pass
     else 
     {
         // Bounds check
