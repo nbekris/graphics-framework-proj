@@ -9,6 +9,8 @@ uniform sampler2D gLightVec;
 uniform sampler2D gEyeVec;
 uniform sampler2D shadowMap;
 uniform sampler2D preBlurShadowMap;
+uniform sampler2D irradianceMap;
+uniform sampler2D skyboxMap;
 uniform mat4 ShadowMatrix;
 
 uniform vec3 lightPos;
@@ -17,6 +19,8 @@ uniform vec3 lightColor;
 uniform int viewMode;
 uniform float width, height;
 uniform vec3 Ambient;
+uniform float linstepLo;
+uniform float linstepHi;
 
 uniform vec3 sceneLightPos;
 uniform vec3 sceneEye;
@@ -183,8 +187,10 @@ float CalculateShadowMSM(vec3 FragPos, vec3 Normal, vec3 L)
     // Run Hamburger 4MSM algorithm
     float G = Hamburger4MSM(moments, zf);
 
-    // Light bleeding reduction: crush low shadow values to zero
-    //G = linstep(0.4, 1.0, G);
+    // Light bleeding reduction + intensity boost:
+    // MSM typically returns G in ~[0, 0.5] range after blurring.
+    // linstepLo crushes light-bleed; linstepHi amplifies shadow intensity.
+    G = linstep(linstepLo, linstepHi, G);
 
     return G;
 }
@@ -196,6 +202,7 @@ void main()
 	// Retrieve g buffer data
 	vec3 FragPos = texture(gFragData[0], uv).rgb;
 	vec3 Normal = texture(gFragData[1], uv).rgb;
+	float emissiveFlag = texture(gFragData[1], uv).a;
 	vec3 Diffuse = texture(gFragData[2], uv).rgb;
 	vec3 Specular = texture(gFragData[3], uv).rgb;
 	float Shininess = texture(gFragData[3], uv).a;
@@ -208,6 +215,20 @@ void main()
 	vec3 V = normalize(eyeVec);
 	vec3 H = normalize(L + V);
 
+	// Sky/emissive pixels: sample skybox with view-direction spherical UVs and output directly
+	if (emissiveFlag < 0.5)
+	{
+		vec2 skyUV = vec2(-atan(V.y, V.x) / (2.0 * PI), acos(V.z) / PI);
+		vec3 skyColor = texture(skyboxMap, skyUV).xyz;
+
+		// Tone map sky to match the rest of the scene
+		vec3 exposed = 10.0 * skyColor;
+		float k = 7.0;
+		vec3 csc = vec3(k / 2.2);
+		FragColor = vec4(pow(exposed / (exposed + vec3(1.0)), csc), 1.0);
+		return;
+	}
+
 	float LN = max(dot(L, N), 0.0);
 	float HN = max(dot(H, N), 0.0);
 	float VN = max(dot(V, N), 0.0);
@@ -219,6 +240,22 @@ void main()
 	vec3 kD = Diffuse;
 	vec3 Fd = kD / PI;
 
+//	float D = DistributionGGX(HN, roughness);
+//	float G_brdf = SmithMethod(VN, LN, roughness);
+//	vec3 F = SchlickFresnel(HV, Specular);
+//	vec3 Fs = (F * G_brdf * D) / max(4.0 * LN * VN, 0.001);
+
+	// Diffuse IBL: sample irradiance map with surface normal
+	vec2 irradianceUV = vec2(-atan(N.y, N.x) / (2.0 * PI), acos(N.z) / PI);
+	vec3 irrCalc = texture(irradianceMap, irradianceUV).xyz;
+	vec3 diffuseIBL = Fd * irrCalc;
+
+	// Specular IBL: sample environment map with reflection vector
+	vec3 R = 2.0 * VN * N - V;
+	vec2 specularUV = vec2(-atan(R.y, R.x) / (2.0 * PI), acos(R.z) / PI);
+	vec3 envRadiance = texture(skyboxMap, specularUV).xyz;
+
+	// Direct light BRDF
 	float D = DistributionGGX(HN, roughness);
 	float G_brdf = SmithMethod(VN, LN, roughness);
 	vec3 F = SchlickFresnel(HV, Specular);
@@ -226,7 +263,7 @@ void main()
 
 	vec3 totalBRDF = Fd + Fs;
 	vec3 directLight = totalBRDF * lightColor * LN;
-	vec3 ambient = Ambient * kD;
+	vec3 ambient = Ambient * kD + diffuseIBL + envRadiance * Fs;
 
 	// MSM shadow: G is shadow intensity (0=lit, 1=shadowed)
 	// Lighting = ambient + (1-G) * [diffuse + specular]
@@ -312,5 +349,13 @@ void main()
 		return;
 	}
 
-	FragColor = vec4(ambient + linstep(0.4, 1.0, 1.0 - G_shadow) * directLight, 1.0);
+	vec3 hdrColor = ambient + (1.0 - G_shadow) * directLight;
+
+	// Exposure control + tone mapping + gamma (matches final.frag forward path)
+	vec3 exposed = 10.0 * hdrColor;            // Exposure control
+	float k = 7.0;
+	vec3 colorSpaceConversion = vec3(k / 2.2);  // Gamma exponent
+	vec3 toneMapped = pow(exposed / (exposed + vec3(1.0)), colorSpaceConversion);
+
+	FragColor = vec4(toneMapped, 1.0);
 }

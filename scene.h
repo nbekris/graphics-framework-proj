@@ -93,6 +93,12 @@ public:
     ShaderProgram* localLightsProgram;
     ShaderProgram* computeBlurShader;
 
+    // Blur parameters
+    int blurWidth = 3;
+    GLuint blurUBO;
+    float shadowLinstepLo = 0.000f;
+    float shadowLinstepHi = 0.010f;
+
     // Options menu stuff
     bool show_demo_window;
 

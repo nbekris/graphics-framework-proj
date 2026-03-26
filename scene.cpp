@@ -16,6 +16,7 @@
 #include "math.h"
 #include <iostream>
 #include <stdlib.h>
+#include <algorithm>
 
 #include <glbinding/gl/gl.h>
 #include <glbinding/Binding.h>
@@ -61,7 +62,6 @@ std::vector<glm::vec3> lightColors;
 std::vector<float> lightRanges;
 
 // Compute shader for Gaussian blur
-std::vector<float> Weights;
 GLuint Bindpoint = 0;
 GLuint scratchpadTextureID;
 GLuint preBlurTextureID; // Debug: copy of shadow map before blur
@@ -303,25 +303,19 @@ void Scene::InitializeScene()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (int)GL_CLAMP_TO_EDGE);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    // Blur kernel weights: symmetric 3-tap Gaussian (blurWidth = 1)
-    Weights = { 0.25f, 0.5f, 0.25f };
-
-    // Upload as UBO with std140 padding (each float padded to 16 bytes = vec4)
-    GLuint bufferID;
-    glGenBuffers(1, &bufferID);
+    // Blur kernel UBO: allocate full 101-element buffer for dynamic updates
+    glGenBuffers(1, &blurUBO);
     Bindpoint = 0;
 
-    std::vector<float> paddedWeights;
-    for (float w : Weights) {
-        paddedWeights.push_back(w);
-        paddedWeights.push_back(0.0f);
-        paddedWeights.push_back(0.0f);
-        paddedWeights.push_back(0.0f);
-    }
+    // Initialize with default blurWidth=1 weights
+    std::vector<float> paddedWeights(101 * 4, 0.0f);
+    paddedWeights[0 * 4] = 0.25f;
+    paddedWeights[1 * 4] = 0.5f;
+    paddedWeights[2 * 4] = 0.25f;
 
-    glBindBuffer(GL_UNIFORM_BUFFER, bufferID);
-    glBufferData(GL_UNIFORM_BUFFER, paddedWeights.size() * sizeof(float), paddedWeights.data(), GL_STATIC_DRAW);
-    glBindBufferBase(GL_UNIFORM_BUFFER, Bindpoint, bufferID);
+    glBindBuffer(GL_UNIFORM_BUFFER, blurUBO);
+    glBufferData(GL_UNIFORM_BUFFER, paddedWeights.size() * sizeof(float), paddedWeights.data(), GL_DYNAMIC_DRAW);
+    glBindBufferBase(GL_UNIFORM_BUFFER, Bindpoint, blurUBO);
 
     // Create all the Polygon shapes
     proceduralground = new ProceduralGround(grndSize, 400,
@@ -473,6 +467,19 @@ void Scene::DrawMenu()
             ImGui::EndMenu(); }
         
         ImGui::EndMainMenuBar(); }
+
+    ImGui::SetNextWindowPos(ImVec2(10, 30), ImGuiCond_Once);
+    ImGui::SetNextWindowSize(ImVec2(300, 120), ImGuiCond_Once);
+    ImGui::SetNextWindowCollapsed(true, ImGuiCond_Once);
+    ImGui::Begin("Shadow Settings");
+    ImGui::SliderInt("Blur Radius", &blurWidth, 0, 50);
+    ImGui::SliderFloat("Linstep Lo", &shadowLinstepLo, 0.0f, 0.5f, "%.3f");
+    ImGui::SliderFloat("Linstep Hi", &shadowLinstepHi, 0.01f, 1.0f, "%.3f");
+    // Ensure Lo < Hi to prevent shadow inversion
+    if (shadowLinstepLo >= shadowLinstepHi)
+        shadowLinstepLo = shadowLinstepHi - 0.01f;
+    ImGui::End();
+
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
@@ -598,8 +605,12 @@ void Scene::CreateShader()
     int loc, programId;
 
     // Relative depth bounds for MSM (used in shadow and lighting passes)
-    float shadowZ0 = front;
-    float shadowZ1 = lightDist + 200.0f;
+    // Tight bounds around the scene as seen from the light.
+    // lightDist is the distance from the light to the origin;
+    // the scene roughly spans [lightDist - sceneRadius, lightDist + sceneRadius].
+    float sceneRadius = 30.0f; // approximate bounding radius of the scene geometry
+    float shadowZ0 = std::max(lightDist - sceneRadius, 0.1f);
+    float shadowZ1 = lightDist + sceneRadius;
 
     // Set Light
    glm::vec3 Light(3, 3, 3);
@@ -656,11 +667,31 @@ void Scene::CreateShader()
    computeBlurShader->UseShader();
    programId = computeBlurShader->programId;
 
+   // Recompute Gaussian weights for current blurWidth
+   {
+       std::vector<float> paddedWeights(101 * 4, 0.0f);
+       if (blurWidth == 0) {
+           paddedWeights[0] = 1.0f;
+       } else {
+           float sigma = std::max(blurWidth / 2.0f, 0.5f);
+           float sum = 0.0f;
+           for (int i = -blurWidth; i <= blurWidth; i++) {
+               float w = exp(-0.5f * (i * i) / (sigma * sigma));
+               sum += w;
+               paddedWeights[(i + blurWidth) * 4] = w;
+           }
+           for (int i = 0; i <= 2 * blurWidth; i++)
+               paddedWeights[i * 4] /= sum;
+       }
+       glBindBuffer(GL_UNIFORM_BUFFER, blurUBO);
+       glBufferSubData(GL_UNIFORM_BUFFER, 0, paddedWeights.size() * sizeof(float), paddedWeights.data());
+   }
+
    // Bind UBO
    loc = glGetUniformBlockIndex(programId, "blurKernel");
    glUniformBlockBinding(programId, loc, Bindpoint);
 
-   glUniform1i(glGetUniformLocation(programId, "blurWidth"), 1);
+   glUniform1i(glGetUniformLocation(programId, "blurWidth"), blurWidth);
 
    // --- Horizontal blur: shadow FBO -> scratchpad ---
    glBindImageTexture(0, shadowFbo.textureID, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
@@ -740,11 +771,14 @@ void Scene::CreateShader()
     deferredLightProgram->UseShader();
 	programId = deferredLightProgram->programId;
 
-    // 2. Bind G-Buffer (We only need to do this ONCE for all lights)
+    // Bind G-Buffer (We only need to do this ONCE for all lights)
     gBufferFbo.BindGBufferTextures(2, programId,
         "gFragData", "gLightVec", "gEyeVec");
 
     shadowFbo.BindTexture(8, programId, "shadowMap");
+
+    sky->texture->BindTexture(10, programId, "skyboxMap");
+	skyIrrMap->BindTexture(11, programId, "irradianceMap");
 
     // Bind pre-blur shadow map for debug visualization
     glActiveTexture(GL_TEXTURE9);
@@ -765,6 +799,11 @@ void Scene::CreateShader()
     loc = glGetUniformLocation(programId, "z1");
     glUniform1f(loc, shadowZ1);
 
+    loc = glGetUniformLocation(programId, "linstepLo");
+    glUniform1f(loc, shadowLinstepLo);
+    loc = glGetUniformLocation(programId, "linstepHi");
+    glUniform1f(loc, shadowLinstepHi);
+
     loc = glGetUniformLocation(programId, "Ambient");
     glUniform3fv(loc, 1, &(Ambient[0]));
 
@@ -774,9 +813,8 @@ void Scene::CreateShader()
     loc = glGetUniformLocation(programId, "lightPos");
     glUniform3fv(loc, 1, &lightPos[0]);
 
-    glm::vec3 debugLightColor(1.0, 1.0, 1.0);
     loc = glGetUniformLocation(programId, "lightColor");
-    glUniform3fv(loc, 1, &debugLightColor[0]);
+    glUniform3fv(loc, 1, &Light[0]);
 
     loc = glGetUniformLocation(programId, "viewPos");
     glUniform3fv(loc, 1, &eye[0]);
@@ -799,6 +837,9 @@ void Scene::CreateShader()
 
     gBufferFbo.UnbindGBufferTextures(2);
 	shadowFbo.UnbindTexture(8);
+	sky->texture->UnbindTexture(10);
+	skyIrrMap->UnbindTexture(11);
+
     glActiveTexture(GL_TEXTURE9);
     glBindTexture(GL_TEXTURE_2D, 0);
     deferredLightProgram->UnuseShader();
