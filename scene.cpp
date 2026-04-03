@@ -44,7 +44,7 @@ const bool fullPolyCount = true; // Use false when emulating the graphics pipeli
 const float PI = 3.14159f;
 const float rad = PI/180.0f;    // Convert degrees to radians
 
-const int numLights = 128;
+const int numLights = 64;
 
 glm::mat4 Identity(1.0);
 glm::mat4 ShadowMatrix;
@@ -65,10 +65,9 @@ std::vector<float> lightRanges;
 GLuint Bindpoint = 0;
 GLuint scratchpadTextureID;
 GLuint preBlurTextureID; // Debug: copy of shadow map before blur
-GLuint SHADOW_WIDTH = 2048;
-GLuint SHADOW_HEIGHT = 2048;
+GLuint SHADOW_WIDTH = 1024;
+GLuint SHADOW_HEIGHT = 1024;
 
-HDR* skyIrrMap;
 
 const float grndSize = 100.0;    // Island radius;  Minimum about 20;  Maximum 1000 or so
 const float grndOctaves = 4.0;  // Number of levels of detail to compute
@@ -173,6 +172,70 @@ Object* FramedPicture(const glm::mat4& modelTr, const int objectId,
 }
 
 ////////////////////////////////////////////////////////////////////////
+// Project an equirectangular HDR image into L=0..2 spherical harmonics
+// (9 RGB coefficients). The image must be RGBA float with 4 channels.
+void ProjectSH(const float* image, int w, int h, glm::vec3 shCoeffs[9])
+{
+    // SH basis constants
+    const float Y00  = 0.282095f;
+    const float Y1m1 = 0.488603f;
+    const float Y10  = 0.488603f;
+    const float Y11  = 0.488603f;
+    const float Y2m2 = 1.092548f;
+    const float Y2m1 = 1.092548f;
+    const float Y20  = 0.315392f;
+    const float Y21  = 1.092548f;
+    const float Y22  = 0.546274f;
+
+    for (int i = 0; i < 9; i++)
+        shCoeffs[i] = glm::vec3(0.0f);
+
+    float weightSum = 0.0f;
+
+    for (int y = 0; y < h; y++) {
+        // theta = polar angle from top (0) to bottom (pi)
+        float theta = PI * (float(y) + 0.5f) / float(h);
+        float sinTheta = sin(theta);
+        float cosTheta = cos(theta);
+
+        for (int x = 0; x < w; x++) {
+            // phi = azimuthal angle (0 to 2*pi)
+            float phi = 2.0f * PI * (float(x) + 0.5f) / float(w);
+
+            // Direction on the unit sphere
+            float dx = sinTheta * cos(phi);
+            float dy = sinTheta * sin(phi);
+            float dz = cosTheta;
+
+            // Solid angle weight for equirectangular projection
+            float solidAngle = (2.0f * PI / float(w)) * (PI / float(h)) * sinTheta;
+            weightSum += solidAngle;
+
+            // Read pixel color (RGBA, stride = 4 floats)
+            int idx = (y * w + x) * 4;
+            glm::vec3 color(image[idx], image[idx + 1], image[idx + 2]);
+
+            glm::vec3 weighted = color * solidAngle;
+
+            // Accumulate into SH coefficients
+            shCoeffs[0] += weighted * Y00;
+            shCoeffs[1] += weighted * (Y1m1 * dy);
+            shCoeffs[2] += weighted * (Y10  * dz);
+            shCoeffs[3] += weighted * (Y11  * dx);
+            shCoeffs[4] += weighted * (Y2m2 * dx * dy);
+            shCoeffs[5] += weighted * (Y2m1 * dy * dz);
+            shCoeffs[6] += weighted * (Y20  * (3.0f * dz * dz - 1.0f));
+            shCoeffs[7] += weighted * (Y21  * dx * dz);
+            shCoeffs[8] += weighted * (Y22  * (dx * dx - dy * dy));
+        }
+    }
+
+    printf("SH projection complete: weightSum=%.4f (expect ~%.4f)\n", weightSum, 4.0f * PI);
+    for (int i = 0; i < 9; i++)
+        printf("  shCoeffs[%d] = (%.4f, %.4f, %.4f)\n", i, shCoeffs[i].x, shCoeffs[i].y, shCoeffs[i].z);
+}
+
+////////////////////////////////////////////////////////////////////////
 // InitializeScene is called once during setup to create all the
 // textures, shape VAOs, and shader programs as well as setting a
 // number of other parameters.
@@ -182,6 +245,7 @@ void Scene::InitializeScene()
     CHECKERROR;
 
     // @@ Initialize interactive viewing variables here. (spin, tilt, ry, front back, ...)
+    fps = 0.0f;
     spin = 0.0;
 	tilt = 30.0;
     tx = 0.0;
@@ -206,6 +270,12 @@ void Scene::InitializeScene()
     lightTilt = -45.0;
     lightDist = 100.0;
     // @@ Perhaps initialize additional scene lighting values here. (lightVal, lightAmb)
+
+    // Set initial shadow/blur parameters
+    blurWidth = 3;
+    lastBlurWidth = -1;
+    shadowLinstepLo = 0.000f;
+    shadowLinstepHi = 0.010f;
 
     // Many local light values
     lightPositions.clear();
@@ -253,6 +323,7 @@ void Scene::InitializeScene()
 	glBindAttribLocation(gBufferProgram->programId, 0, "vertex");
 	glBindAttribLocation(gBufferProgram->programId, 1, "vertexNormal");
 	glBindAttribLocation(gBufferProgram->programId, 2, "vertexTexture");
+	glBindAttribLocation(gBufferProgram->programId, 3, "vertexTangent");
 	gBufferProgram->LinkProgram();
 
 	deferredLightProgram = new ShaderProgram();
@@ -262,11 +333,32 @@ void Scene::InitializeScene()
 	glBindAttribLocation(deferredLightProgram->programId, 2, "vertexTexture");
 	deferredLightProgram->LinkProgram();
 
+    {
+        GLuint loc = glGetUniformBlockIndex(deferredLightProgram->programId, "HammersleyBlock");
+        if (loc != GL_INVALID_INDEX)
+            glUniformBlockBinding(deferredLightProgram->programId, loc, 1);
+        else
+            printf("WARNING: HammersleyBlock not found in deferredLightProgram\n");
+    }
+
     localLightsProgram = new ShaderProgram();
     localLightsProgram->AddShader("localLights.vert", GL_VERTEX_SHADER);
     localLightsProgram->AddShader("localLights.frag", GL_FRAGMENT_SHADER);
     glBindAttribLocation(localLightsProgram->programId, 0, "vertex");
     localLightsProgram->LinkProgram();
+
+	// Reflection Shader Program (dual-paraboloid, forward lighting)
+	// reflection.vert does paraboloid projection + calls LightingVertex() from lighting.vert
+	// reflection.frag is self-contained with lighting matching deferredLight.frag
+	reflectionProgram = new ShaderProgram();
+	reflectionProgram->AddShader("reflection.vert", GL_VERTEX_SHADER);
+	reflectionProgram->AddShader("lighting.vert", GL_VERTEX_SHADER);
+	reflectionProgram->AddShader("reflection.frag", GL_FRAGMENT_SHADER);
+	glBindAttribLocation(reflectionProgram->programId, 0, "vertex");
+	glBindAttribLocation(reflectionProgram->programId, 1, "vertexNormal");
+	glBindAttribLocation(reflectionProgram->programId, 2, "vertexTexture");
+	glBindAttribLocation(reflectionProgram->programId, 3, "vertexTangent");
+	reflectionProgram->LinkProgram();
 
 	// Shadow Map Shader Program Initialization
     shadowProgram = new ShaderProgram();
@@ -361,8 +453,35 @@ void Scene::InitializeScene()
     Texture* rightFrameTexture = new Texture("textures/my-house-01.png");
     Texture* skyTexture = new Texture("skys/Ocean.png");
 
-    HDR* skyHDR = new HDR("skys/Road_to_MonumentValley_Ref.hdr");
-    skyIrrMap = new HDR("skys/Road_to_MonumentValley_Ref.irr.hdr"); // is this how you really read it in?
+    HDR* skyHDR = new HDR("skys/Road_to_MonumentValley_Ref.hdr", true);
+    ProjectSH(skyHDR->image, skyHDR->width, skyHDR->height, shCoeffs);
+    skyHDRWidth  = skyHDR->width;
+    skyHDRHeight = skyHDR->height;
+    skyHDR->FreePixels();
+
+    // Build Hammersley low-discrepancy sequence for IBL specular
+    {
+        memset(&hammersleyBlock, 0, sizeof(hammersleyBlock));
+        hammersleyBlock.numSamples = numSamples;
+
+        int kk;
+        float p, u;
+        for (int k = 0; k < numSamples; k++) {
+            u = 0.0f;
+            for (p = 0.5f, kk = k; kk; p *= 0.5f, kk >>= 1)
+                if (kk & 1) u += p;
+            float v = (k + 0.5f) / numSamples;
+            // Pack 2 pairs per vec4: k=0,1 -> vec4[0], k=2,3 -> vec4[1], etc.
+            int vec4Idx = k / 2;
+            int offset  = (k % 2) * 2; // 0 or 2
+            hammersleyBlock.hammersley[vec4Idx][offset]     = u;
+            hammersleyBlock.hammersley[vec4Idx][offset + 1] = v;
+        }
+
+        glGenBuffers(1, &hammersleyUBO);
+        glBindBufferBase(GL_UNIFORM_BUFFER, 1, hammersleyUBO);
+        glBufferData(GL_UNIFORM_BUFFER, sizeof(hammersleyBlock), &hammersleyBlock, GL_STATIC_DRAW);
+    }
 
     Texture* roomNormal = new Texture("textures/Standard_red_pxr128_normal.png");
     Texture* seaNormal = new Texture("textures/ripples_normalmap.png");
@@ -464,14 +583,19 @@ void Scene::DrawMenu()
             if (ImGui::MenuItem("Shadow Moments (z^4)", "",		mode==5)) { mode=5; }
             if (ImGui::MenuItem("Pre-Blur Moments (z)", "",		mode==6)) { mode=6; }
             if (ImGui::MenuItem("Blur Comparison (split)", "",		mode==7)) { mode=7; }
+            if (ImGui::MenuItem("SH Irradiance (surfaces)", "",		mode==8)) { mode=8; }
+            if (ImGui::MenuItem("SH Irradiance (sky sphere)", "",	mode==9)) { mode=9; }
             ImGui::EndMenu(); }
         
+        ImGui::SameLine(ImGui::GetWindowWidth() - 100);
+        ImGui::Text("FPS: %.1f", fps);
         ImGui::EndMainMenuBar(); }
 
     ImGui::SetNextWindowPos(ImVec2(10, 30), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2(300, 120), ImGuiCond_Once);
+    ImGui::SetNextWindowSize(ImVec2(300, 160), ImGuiCond_Once);
     ImGui::SetNextWindowCollapsed(true, ImGuiCond_Once);
-    ImGui::Begin("Shadow Settings");
+    ImGui::Begin("Settings");
+    ImGui::SliderFloat("Exposure", &exposure, 0.1f, 10000.0f, "%.1f", ImGuiSliderFlags_Logarithmic);
     ImGui::SliderInt("Blur Radius", &blurWidth, 0, 50);
     ImGui::SliderFloat("Linstep Lo", &shadowLinstepLo, 0.0f, 0.5f, "%.3f");
     ImGui::SliderFloat("Linstep Hi", &shadowLinstepHi, 0.01f, 1.0f, "%.3f");
@@ -546,6 +670,9 @@ void Scene::DrawScene()
     time_since_last_refresh = current_time - last_refresh_time;
     step = speed * time_since_last_refresh;
     last_refresh_time = current_time;
+
+    if (time_since_last_refresh > 0.0)
+        fps = fps + 0.03f * (float(1.0 / time_since_last_refresh) - fps);
 
 	// Update eye position based on keys pressed
     if (w_down) 
@@ -667,8 +794,8 @@ void Scene::CreateShader()
    computeBlurShader->UseShader();
    programId = computeBlurShader->programId;
 
-   // Recompute Gaussian weights for current blurWidth
-   {
+   // Recompute Gaussian weights only when blurWidth changes
+   if (blurWidth != lastBlurWidth) {
        std::vector<float> paddedWeights(101 * 4, 0.0f);
        if (blurWidth == 0) {
            paddedWeights[0] = 1.0f;
@@ -685,6 +812,7 @@ void Scene::CreateShader()
        }
        glBindBuffer(GL_UNIFORM_BUFFER, blurUBO);
        glBufferSubData(GL_UNIFORM_BUFFER, 0, paddedWeights.size() * sizeof(float), paddedWeights.data());
+       lastBlurWidth = blurWidth;
    }
 
    // Bind UBO
@@ -716,6 +844,72 @@ void Scene::CreateShader()
    computeBlurShader->UnuseShader();
 
     // -----------------------------------------------------------------
+    // Reflection Pass - Render scene into dual-paraboloid maps
+    // Two passes: top hemisphere (reflectDir=+1) and bottom (reflectDir=-1)
+    // -----------------------------------------------------------------
+
+    // Shadow matrix with bias (used by reflection and deferred passes)
+    const glm::mat4 B = Translate(0.5f, 0.5f, 0.5f) * Scale(0.5f, 0.5f, 0.5f);
+    ShadowMatrix = B * ShadowProj * ShadowView;
+
+    reflectionProgram->UseShader();
+    programId = reflectionProgram->programId;
+
+    // ShadowMatrix needed by lighting.vert for shadowCoord varying
+    loc = glGetUniformLocation(programId, "ShadowMatrix");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowMatrix));
+
+    // Uniforms needed by reflection.frag
+    loc = glGetUniformLocation(programId, "lightPos");
+    glUniform3fv(loc, 1, &lightPos[0]);
+    loc = glGetUniformLocation(programId, "Light");
+    glUniform3fv(loc, 1, &Light[0]);
+    loc = glGetUniformLocation(programId, "Ambient");
+    glUniform3fv(loc, 1, &Ambient[0]);
+    loc = glGetUniformLocation(programId, "shCoeffs");
+    glUniform3fv(loc, 9, &shCoeffs[0][0]);
+
+    sky->texture->BindTexture(10, programId, "skyboxMap");
+
+    loc = glGetUniformLocation(programId, "exposure");
+    glUniform1f(loc, exposure);
+
+    // Reflection eye position (centered above the scene)
+    glm::vec3 reflectEye(0.0f, 0.0f, 1.5f);
+    loc = glGetUniformLocation(programId, "Eye");
+    glUniform3fv(loc, 1, &reflectEye[0]);
+
+    // Top hemisphere
+    reflectionTopFbo.BindFBO();
+    glViewport(0, 0, reflectionTopFbo.width, reflectionTopFbo.height);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    loc = glGetUniformLocation(programId, "ReflectDir");
+    glUniform1f(loc, 1.0f);
+
+    teapot->drawMe = false;  // Don't draw reflective objects in their own reflection
+    objectRoot->Draw(reflectionProgram, Identity);
+    reflectionTopFbo.UnbindFBO();
+
+    // Bottom hemisphere
+    reflectionBottomFbo.BindFBO();
+    glViewport(0, 0, reflectionBottomFbo.width, reflectionBottomFbo.height);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    loc = glGetUniformLocation(programId, "ReflectDir");
+    glUniform1f(loc, -1.0f);
+
+    objectRoot->Draw(reflectionProgram, Identity);
+    reflectionBottomFbo.UnbindFBO();
+
+    teapot->drawMe = true;  // Restore for G-buffer pass
+
+    sky->texture->UnbindTexture(10);
+    reflectionProgram->UnuseShader();
+
+    // -----------------------------------------------------------------
     // G Buffer Pass
     // Render all scene objects into the G-Buffer textures
     // -----------------------------------------------------------------
@@ -743,6 +937,9 @@ void Scene::CreateShader()
 
     // Set View Position (Needed for Specular)
     loc = glGetUniformLocation(gBufferProgram->programId, "eye");
+    glUniform3fv(loc, 1, &eye[0]);
+
+    loc = glGetUniformLocation(gBufferProgram->programId, "viewPos");
     glUniform3fv(loc, 1, &eye[0]);
 
     // Draw the entire scene hierarchy
@@ -778,7 +975,12 @@ void Scene::CreateShader()
     shadowFbo.BindTexture(8, programId, "shadowMap");
 
     sky->texture->BindTexture(10, programId, "skyboxMap");
-	skyIrrMap->BindTexture(11, programId, "irradianceMap");
+    reflectionTopFbo.BindTexture(12, programId, "reflectionTop");
+    reflectionBottomFbo.BindTexture(13, programId, "reflectionBottom");
+
+    // Upload SH coefficients for diffuse IBL
+    loc = glGetUniformLocation(programId, "shCoeffs");
+    glUniform3fv(loc, 9, &shCoeffs[0][0]);
 
     // Bind pre-blur shadow map for debug visualization
     glActiveTexture(GL_TEXTURE9);
@@ -786,10 +988,7 @@ void Scene::CreateShader()
     loc = glGetUniformLocation(programId, "preBlurShadowMap");
     glUniform1i(loc, 9);
 
-    // Shadow matrix with bias (maps NDC [-1,1] to [0,1] for texture lookup)
-    const glm::mat4 B = Translate(0.5f, 0.5f, 0.5f) * Scale(0.5f, 0.5f, 0.5f);
-    ShadowMatrix = B * ShadowProj * ShadowView;
-
+    // ShadowMatrix already computed before reflection pass
     loc = glGetUniformLocation(programId, "ShadowMatrix");
     glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowMatrix));
 
@@ -831,6 +1030,15 @@ void Scene::CreateShader()
     loc = glGetUniformLocation(programId, "sceneEye");
     glUniform3fv(loc, 1, &eye[0]);
 
+    // Sky HDR dimensions for mipmap level calculation
+    loc = glGetUniformLocation(programId, "skyWidth");
+    glUniform1f(loc, (float)skyHDRWidth);
+    loc = glGetUniformLocation(programId, "skyHeight");
+    glUniform1f(loc, (float)skyHDRHeight);
+
+    loc = glGetUniformLocation(programId, "exposure");
+    glUniform1f(loc, exposure);
+
     CHECKERROR;
     fullScreenQuad->Draw(deferredLightProgram, Identity);
     CHECKERROR;
@@ -838,7 +1046,8 @@ void Scene::CreateShader()
     gBufferFbo.UnbindGBufferTextures(2);
 	shadowFbo.UnbindTexture(8);
 	sky->texture->UnbindTexture(10);
-	skyIrrMap->UnbindTexture(11);
+	reflectionTopFbo.UnbindTexture(12);
+	reflectionBottomFbo.UnbindTexture(13);
 
     glActiveTexture(GL_TEXTURE9);
     glBindTexture(GL_TEXTURE_2D, 0);

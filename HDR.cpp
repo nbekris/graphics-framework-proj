@@ -25,7 +25,7 @@ HDR::HDR()
 {
 }
 
-HDR::HDR(const std::string& filePath)
+HDR::HDR(const std::string& filePath, bool keepPixels)
 {
     stbi_set_flip_vertically_on_load(true);
     image = stbi_loadf(filePath.c_str(), &width, &height, &depth, 4);
@@ -44,7 +44,18 @@ HDR::HDR(const std::string& filePath)
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (int)GL_LINEAR_MIPMAP_LINEAR);
     glBindTexture(GL_TEXTURE_2D, 0);
-    stbi_image_free(image);
+    if (!keepPixels) {
+        stbi_image_free(image);
+        image = nullptr;
+    }
+}
+
+void HDR::FreePixels()
+{
+    if (image) {
+        stbi_image_free(image);
+        image = nullptr;
+    }
 }
 
 void HDR::BindTexture(const int unit, const int programId, const std::string& name)

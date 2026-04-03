@@ -8,7 +8,8 @@ class HDR : public Texture
 		//int width, height, depth;
 		float* image;
 		HDR();
-		HDR(const std::string& filePath);
+		HDR(const std::string& filePath, bool keepPixels = false);
+		void FreePixels();
 		void BindTexture(const int unit, const int programId, const std::string& name);
 		void UnbindTexture(const int unit);
 };

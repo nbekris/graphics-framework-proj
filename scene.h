@@ -94,10 +94,31 @@ public:
     ShaderProgram* computeBlurShader;
 
     // Blur parameters
-    int blurWidth = 3;
+    int blurWidth;
+    int lastBlurWidth;
     GLuint blurUBO;
-    float shadowLinstepLo = 0.000f;
-    float shadowLinstepHi = 0.010f;
+    float shadowLinstepLo;
+    float shadowLinstepHi;
+
+    float fps;
+
+    // Spherical Harmonics coefficients (L=0..2, 9 vec3s)
+    glm::vec3 shCoeffs[9];
+
+    // IBL specular: Hammersley low-discrepancy sequence
+    int numSamples = 20;
+    GLuint hammersleyUBO = 0;
+    int skyHDRWidth = 0, skyHDRHeight = 0;
+
+    // std140-compatible struct: numSamples (int, padded to 16), then vec4[50] holding 2 pairs each
+    struct HammersleyBlock {
+        int numSamples;
+        int pad[3];              // pad to 16 bytes
+        float hammersley[50][4]; // vec4[50]: each holds (u0,v0, u1,v1)
+    } hammersleyBlock;
+
+    // Tone mapping
+    float exposure = 2.0f;
 
     // Options menu stuff
     bool show_demo_window;
