@@ -36,8 +36,6 @@ const int floorId  = 11;
 
 const float PI = 3.14159265359;
 
-uniform float exposure;
-
 vec3 SchlickFresnel(float cosAngle, vec3 Ks)
 {
 	return Ks + (1.0 - Ks) * pow(1 - cosAngle, 5.0);
@@ -145,8 +143,7 @@ void main()
 		vec2 skyUV = vec2(-atan(V.y, V.x) / (2 * PI), acos(V.z) / PI);
 		if (hasTexture > 0.5)
 			Kd = texture(tex, skyUV).rgb;
-		vec3 exposed = exposure * Kd;
-		FragColor = vec4(pow(exposed / (exposed + vec3(1.0)), vec3(1.0/2.2)), 1.0);
+		FragColor = vec4(Kd, 1.0);
 		return;
 	}
 
@@ -181,7 +178,5 @@ void main()
 
 	vec3 hdrColor = ambient + directLight;
 
-	// Tone mapping: C_out = (e*C / (e*C + 1))^(1/2.2)
-	vec3 exposed = exposure * hdrColor;
-	FragColor = vec4(pow(exposed / (exposed + vec3(1.0)), vec3(1.0/2.2)), 1.0);
+	FragColor = vec4(hdrColor, 1.0);
 }

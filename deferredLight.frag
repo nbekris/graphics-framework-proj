@@ -269,10 +269,11 @@ void main()
 	}
 
 	// Reflective pixels: sample dual-paraboloid reflection maps
+	vec3 reflectColor = vec3(0.0);
 	if (reflectiveFlag > 0.5)
 	{
-		float VN = max(dot(V, N), 0.0);
-		vec3 R = 2.0 * VN * N - V;
+		float VN_r = max(dot(V, N), 0.0);
+		vec3 R = 2.0 * VN_r * N - V;
 
 		vec3 normalR = normalize(R);
 		float a = normalR.x;
@@ -286,14 +287,10 @@ void main()
 
 		vec2 reflectUV = vec2(a, b) * 0.5 + vec2(0.5, 0.5);
 
-		vec3 reflectColor;
 		if (reflectDir > 0.0)
 			reflectColor = texture(reflectionTop, reflectUV).xyz;
 		else
 			reflectColor = texture(reflectionBottom, reflectUV).xyz;
-
-		FragColor = vec4(reflectColor, 1.0);
-		return;
 	}
 
 	float LN = max(dot(L, N), 0.0);
@@ -480,6 +477,13 @@ void main()
 	}
 
 	vec3 hdrColor = ambient + (1.0 - G_shadow) * directLight;
+
+	// Blend in dual-paraboloid reflection for reflective surfaces
+	if (reflectiveFlag > 0.5)
+	{
+		vec3 F_refl = SchlickFresnel(VN, Specular);
+		hdrColor = mix(hdrColor, reflectColor, F_refl);
+	}
 
 	// Exposure control + tone mapping + gamma: C_out = (e*C / (e*C + 1))^(1/2.2)
 	vec3 exposed = exposure * hdrColor;

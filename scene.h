@@ -120,6 +120,8 @@ public:
     // Tone mapping
     float exposure = 2.0f;
 
+    bool enablePointLights = true;
+
     // Options menu stuff
     bool show_demo_window;
 

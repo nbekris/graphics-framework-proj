@@ -231,6 +231,23 @@ void ProjectSH(const float* image, int w, int h, glm::vec3 shCoeffs[9])
     }
 
     printf("SH projection complete: weightSum=%.4f (expect ~%.4f)\n", weightSum, 4.0f * PI);
+
+    // Step 3: Multiply by clamped cosine lobe coefficients A^_l
+    // A^_0 = pi,  A^_1 = 2pi/3,  A^_2 = pi/4
+    float A0 = PI;
+    float A1 = 2.0f * PI / 3.0f;
+    float A2 = PI / 4.0f;
+
+    shCoeffs[0] *= A0;           // band 0
+    shCoeffs[1] *= A1;           // band 1
+    shCoeffs[2] *= A1;
+    shCoeffs[3] *= A1;
+    shCoeffs[4] *= A2;           // band 2
+    shCoeffs[5] *= A2;
+    shCoeffs[6] *= A2;
+    shCoeffs[7] *= A2;
+    shCoeffs[8] *= A2;
+
     for (int i = 0; i < 9; i++)
         printf("  shCoeffs[%d] = (%.4f, %.4f, %.4f)\n", i, shCoeffs[i].x, shCoeffs[i].y, shCoeffs[i].z);
 }
@@ -602,6 +619,7 @@ void Scene::DrawMenu()
     // Ensure Lo < Hi to prevent shadow inversion
     if (shadowLinstepLo >= shadowLinstepHi)
         shadowLinstepLo = shadowLinstepHi - 0.01f;
+    ImGui::Checkbox("Point Lights", &enablePointLights);
     ImGui::End();
 
     ImGui::Render();
@@ -1058,72 +1076,71 @@ void Scene::CreateShader()
     // Render many local lights
     // -----------------------------------------------------------------
 
-    glBlendFunc(GL_ONE, GL_ONE);
-    glEnable(GL_BLEND);
+    if (enablePointLights)
+    {
+        glBlendFunc(GL_ONE, GL_ONE);
+        glEnable(GL_BLEND);
 
-    glCullFace(GL_FRONT);
-    glEnable(GL_CULL_FACE);
+        glCullFace(GL_FRONT);
+        glEnable(GL_CULL_FACE);
 
-    glDisable(GL_DEPTH_TEST);
+        glDisable(GL_DEPTH_TEST);
 
-    localLightsProgram->UseShader();
+        localLightsProgram->UseShader();
 
-    programId = localLightsProgram->programId;
+        programId = localLightsProgram->programId;
 
-    const GLint lightPosLoc = glGetUniformLocation(programId, "lightPos");
-    const GLint colorLoc = glGetUniformLocation(programId, "lightColor");
-    const GLint rangeLoc = glGetUniformLocation(programId, "lightRadius");
+        const GLint lightPosLoc = glGetUniformLocation(programId, "lightPos");
+        const GLint colorLoc = glGetUniformLocation(programId, "lightColor");
+        const GLint rangeLoc = glGetUniformLocation(programId, "lightRadius");
 
-    loc = glGetUniformLocation(programId, "WorldView");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldView));
+        loc = glGetUniformLocation(programId, "WorldView");
+        glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldView));
 
-    loc = glGetUniformLocation(programId, "WorldProj");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
+        loc = glGetUniformLocation(programId, "WorldProj");
+        glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
 
-    loc = glGetUniformLocation(programId, "width");
-    glUniform1f(loc, width);
+        loc = glGetUniformLocation(programId, "width");
+        glUniform1f(loc, width);
 
-    loc = glGetUniformLocation(programId, "height");
-    glUniform1f(loc, height);
+        loc = glGetUniformLocation(programId, "height");
+        glUniform1f(loc, height);
 
-    // Set View Position (Needed for Specular)
-    loc = glGetUniformLocation(programId, "eye");
-    glUniform3fv(loc, 1, &eye[0]);
+        // Set View Position (Needed for Specular)
+        loc = glGetUniformLocation(programId, "eye");
+        glUniform3fv(loc, 1, &eye[0]);
 
-    //// Bind G-Buffer (We only need to do this ONCE for all lights)
-    gBufferFbo.BindGBufferTextures(2, programId,
-        "gFragData", "gLightVec", "gEyeVec");
+        //// Bind G-Buffer (We only need to do this ONCE for all lights)
+        gBufferFbo.BindGBufferTextures(2, programId,
+            "gFragData", "gLightVec", "gEyeVec");
 
-    for (int i = 0; i < numLights; ++i) {
-        const glm::vec3 position = lightPositions[i];
-        const glm::vec3 color = lightColors[i];
+        for (int i = 0; i < numLights; ++i) {
+            const glm::vec3 position = lightPositions[i];
+            const glm::vec3 color = lightColors[i];
 
-        const float range = lightRanges[i];
+            const float range = lightRanges[i];
 
-        // Calculate the model matrix
-        glm::mat4 model = Translate(position.x, position.y, position.z) * Scale(range, range, range);
+            // Calculate the model matrix
+            glm::mat4 model = Translate(position.x, position.y, position.z) * Scale(range, range, range);
 
-        glUniform3fv(colorLoc, 1, &color[0]);
-        glUniform3fv(lightPosLoc, 1, &position[0]);
-        glUniform1fv(rangeLoc, 1, &range);
+            glUniform3fv(colorLoc, 1, &color[0]);
+            glUniform3fv(lightPosLoc, 1, &position[0]);
+            glUniform1fv(rangeLoc, 1, &range);
 
-        CHECKERROR;
-        lightVolumeSphere->Draw(localLightsProgram, model);
-        //lightVolumeSphere->DrawVAO();
-        //objectRoot->Draw(localLightsProgram, model);
-        CHECKERROR;
+            CHECKERROR;
+            lightVolumeSphere->Draw(localLightsProgram, model);
+            CHECKERROR;
+        }
+
+        // Clean up
+        glDisable(GL_BLEND);
+        glCullFace(GL_BACK);
+        glDisable(GL_CULL_FACE);
+
+        glEnable(GL_DEPTH_TEST);
+        glDepthMask(GL_TRUE);
+
+        gBufferFbo.UnbindGBufferTextures(2);
+        localLightsProgram->UnuseShader();
     }
-
-    //lightVolumeSphere->Draw(localLightsProgram, Scale(3.0, 3.0, 3.0));
-
-    // Clean up
-    glDisable(GL_BLEND);
-    glCullFace(GL_BACK);
-    glDisable(GL_CULL_FACE);
-
-    glEnable(GL_DEPTH_TEST);
-    glDepthMask(GL_TRUE);
-
-    gBufferFbo.UnbindGBufferTextures(2);
-    localLightsProgram->UnuseShader();
 }
