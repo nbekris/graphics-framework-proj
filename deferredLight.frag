@@ -41,6 +41,7 @@ layout(std140) uniform HammersleyBlock {
 
 uniform float skyWidth, skyHeight;
 uniform float exposure;
+uniform int enableDirectLight;
 
 vec3 SchlickFresnel(float cosAngle, vec3 Ks)
 {
@@ -259,12 +260,22 @@ void main()
 	// Sky/emissive pixels: sample skybox with view-direction spherical UVs and output directly
 	if (emissiveFlag < 0.5)
 	{
-		vec2 skyUV = vec2(-atan(V.y, V.x) / (2.0 * PI), acos(V.z) / PI);
-		vec3 skyColor = texture(skyboxMap, skyUV).xyz;
+		vec2 skyUV = vec2(-atan(V.y, V.x) / (2.0 * PI), acos(clamp(V.z, -1.0, 1.0)) / PI);
 
-		// Tone map sky to match the rest of the scene
-		vec3 exposed = exposure * skyColor;
-		FragColor = vec4(pow(exposed / (exposed + vec3(1.0)), vec3(1.0/2.2)), 1.0);
+		if (viewMode == 11)
+		{
+			// Debug: visualize SH irradiance map on sky sphere (should look like a blurred skybox)
+			vec3 irr = max(EvaluateSH(-V), vec3(0.0));
+			vec3 exposed = exposure * irr;
+			FragColor = vec4(pow(exposed / (exposed + vec3(1.0)), vec3(1.0/2.2)), 1.0);
+		}
+		else
+		{
+			// Normal sky rendering (also used for mode 10 HDR skybox view)
+			vec3 skyColor = texture(skyboxMap, skyUV).xyz;
+			vec3 exposed = exposure * skyColor;
+			FragColor = vec4(pow(exposed / (exposed + vec3(1.0)), vec3(1.0/2.2)), 1.0);
+		}
 		return;
 	}
 
@@ -307,7 +318,7 @@ void main()
 //	float D = DistributionGGX(HN, roughness);
 //	float G_brdf = SmithMethod(VN, LN, roughness);
 //	vec3 F = SchlickFresnel(HV, Specular);
-//	vec3 Fs = (F * G_brdf * D) / max(4.0 * LN * VN, 0.001);
+//	vec3 Fs = (F * G_brdf * D) / max(4.0 * LN * VN, 0.01);
 
 	// Diffuse IBL: evaluate spherical harmonics with surface normal
 	vec3 irrCalc = max(EvaluateSH(N), vec3(0.0));
@@ -343,8 +354,10 @@ void main()
 		float NdotOmega = max(dot(N, omega_k), 0.0);
 		if (NdotOmega <= 0.0) continue;
 
-		// Half vector for this sample
-		vec3 H_k = normalize(omega_k + V);
+		// Half vector for this sample; skip degenerate case where omega_k ≈ -V
+		vec3 H_k_unnorm = omega_k + V;
+		if (dot(H_k_unnorm, H_k_unnorm) < 1e-6) continue;
+		vec3 H_k = normalize(H_k_unnorm);
 		float HkN = max(dot(H_k, N), 0.0);
 		float HkV = max(dot(H_k, V), 0.0);
 
@@ -354,26 +367,35 @@ void main()
 		            - 0.5 * log2(D_H / 4.0) - 1.0;
 
 		// Sample environment map at calculated mip level
-		vec2 uv_k = vec2(-atan(omega_k.y, omega_k.x) / (2.0*PI),
-		                  acos(omega_k.z) / PI);
+		// Negate omega_k to match sky dome's inward-pointing UV convention
+		vec2 uv_k = vec2(-atan(-omega_k.y, -omega_k.x) / (2.0*PI),
+		                  acos(clamp(-omega_k.z, -1.0, 1.0)) / PI);
 		vec3 Li = textureLod(skyboxMap, uv_k, max(level, 0.0)).xyz;
 
 		// Monte-Carlo estimator (eq 3): D(H) canceled by p(omega_k)
-		float G_k = SmithMethod(max(VN, 0.001), NdotOmega, roughness);
+		float G_k = SmithMethod(max(VN, 0.01), NdotOmega, roughness);
 		vec3  F_k = SchlickFresnel(HkV, Specular);
 
-		specularIBL += Li * G_k * F_k / (4.0 * max(VN, 0.001));
+		vec3 sampleContrib = Li * G_k * F_k / (4.0 * max(VN, 0.01));
+		// Guard against NaN from degenerate geometry
+		if (any(isnan(sampleContrib)) || any(isinf(sampleContrib))) continue;
+		specularIBL += sampleContrib;
 	}
 	specularIBL /= max(float(n), 1.0);
+
+	// Clamp specular IBL to suppress fireflies from Monte-Carlo variance
+	// at grazing angles where the 1/VN term amplifies sample noise
+	specularIBL = min(specularIBL, vec3(10.0));
 
 	// Direct light BRDF
 	float D = DistributionGGX(HN, roughness);
 	float G_brdf = SmithMethod(VN, LN, roughness);
 	vec3 F = SchlickFresnel(HV, Specular);
-	vec3 Fs = (F * G_brdf * D) / max(4.0 * LN * VN, 0.001);
+	vec3 Fs = (F * G_brdf * D) / max(4.0 * LN * VN, 0.01);
+	Fs = min(Fs, vec3(10.0));
 
 	vec3 totalBRDF = Fd + Fs;
-	vec3 directLight = totalBRDF * lightColor * LN;
+	vec3 directLight = (enableDirectLight == 1) ? totalBRDF * lightColor * LN : vec3(0.0);
 	vec3 ambient = diffuseIBL + specularIBL;
 
 	// MSM shadow: G is shadow intensity (0=lit, 1=shadowed)
@@ -472,6 +494,24 @@ void main()
 		// Debug: visualize SH reconstruction on sky sphere using view direction
 		vec3 shSky = max(EvaluateSH(V), vec3(0.0));
 		vec3 exposed = exposure * shSky;
+		FragColor = vec4(pow(exposed / (exposed + vec3(1.0)), vec3(1.0/2.2)), 1.0);
+		return;
+	}
+
+	else if (viewMode == 10)
+	{
+		// Debug: visualize raw HDR skybox projected onto geometry via view direction
+		vec2 skyUV = vec2(-atan(V.y, V.x) / (2.0 * PI), acos(clamp(V.z, -1.0, 1.0)) / PI);
+		vec3 hdr = texture(skyboxMap, skyUV).xyz;
+		vec3 exposed = exposure * hdr;
+		FragColor = vec4(pow(exposed / (exposed + vec3(1.0)), vec3(1.0/2.2)), 1.0);
+		return;
+	}
+	else if (viewMode == 11)
+	{
+		// Debug: visualize SH irradiance on surfaces (evaluated with surface normal)
+		vec3 irr = max(EvaluateSH(N), vec3(0.0));
+		vec3 exposed = exposure * irr;
 		FragColor = vec4(pow(exposed / (exposed + vec3(1.0)), vec3(1.0/2.2)), 1.0);
 		return;
 	}

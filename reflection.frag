@@ -118,7 +118,7 @@ void main()
 			N = SetNormalMap(uv * 30.0, T, B, N);
 		float VN = max(dot(V, N), 0.0);
 		vec3 R = V - 2.0 * VN * N;
-		uv = vec2(-atan(R.y, R.x) / (2 * PI), acos(R.z) / PI);
+		uv = vec2(-atan(R.y, R.x) / (2 * PI), acos(clamp(R.z, -1.0, 1.0)) / PI);
 	}
 
 	// Diffuse color
@@ -140,10 +140,10 @@ void main()
 	// Sky: output color directly
 	if (objectId == skyId)
 	{
-		vec2 skyUV = vec2(-atan(V.y, V.x) / (2 * PI), acos(V.z) / PI);
+		vec2 skyUV = vec2(-atan(V.y, V.x) / (2 * PI), acos(clamp(V.z, -1.0, 1.0)) / PI);
 		if (hasTexture > 0.5)
 			Kd = texture(tex, skyUV).rgb;
-		FragColor = vec4(Kd, 1.0);
+		FragColor = vec4(min(Kd, vec3(25.0)), 1.0);
 		return;
 	}
 
@@ -163,20 +163,24 @@ void main()
 
 	// Specular IBL: simple environment map lookup (no Monte-Carlo in reflection pass)
 	vec3 R = 2.0 * VN * N - V;
-	vec2 specularUV = vec2(-atan(R.y, R.x) / (2.0 * PI), acos(R.z) / PI);
+	vec2 specularUV = vec2(-atan(-R.y, -R.x) / (2.0 * PI), acos(clamp(-R.z, -1.0, 1.0)) / PI);
 	vec3 specularIBL = texture(skyboxMap, specularUV).xyz * specular;
 
 	// Direct light BRDF
 	float D = DistributionGGX(HN, roughness);
 	float G_brdf = SmithMethod(VN, LN, roughness);
 	vec3 F = SchlickFresnel(HV, specular);
-	vec3 Fs = (F * G_brdf * D) / max(4.0 * LN * VN, 0.001);
+	vec3 Fs = (F * G_brdf * D) / max(4.0 * LN * VN, 0.01);
+	Fs = min(Fs, vec3(10.0));
 
 	vec3 totalBRDF = Fd + Fs;
 	vec3 directLight = totalBRDF * Light * LN;
 	vec3 ambient = diffuseIBL + specularIBL;
 
 	vec3 hdrColor = ambient + directLight;
+
+	// Clamp to prevent firefly artifacts from stretched paraboloid-edge geometry
+	hdrColor = min(hdrColor, vec3(25.0));
 
 	FragColor = vec4(hdrColor, 1.0);
 }

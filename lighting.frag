@@ -134,7 +134,7 @@ vec3 LightingPixel()
 	}
 	if (objectId==skyId) 
 	{
-		uv =  vec2(-atan(V.y, V.x) / (2 * PI), acos(V.z) / PI);
+		uv =  vec2(-atan(V.y, V.x) / (2 * PI), acos(clamp(V.z, -1.0, 1.0)) / PI);
 	}
 	if (objectId==floorId)
 	{
@@ -169,7 +169,7 @@ vec3 LightingPixel()
 			VN = max(dot(V, N), 0.0);
 		}
 		vec3 R = V - 2.0 * VN * N;
-		uv = vec2(-atan(R.y, R.x) / (2 * PI), acos(R.z) / PI);
+		uv = vec2(-atan(R.y, R.x) / (2 * PI), acos(clamp(R.z, -1.0, 1.0)) / PI);
 	}
 
 	Kd = diffuse;
@@ -229,7 +229,7 @@ vec3 LightingPixel()
 		float RN = max(dot(R, N), 0.0);
 		vec3 Fd = Kd / PI;
 
-		vec2 irradianceN = vec2(-atan(R.y, R.x) / (2 * PI), acos(R.z) / PI);
+		vec2 irradianceN = vec2(-atan(-R.y, -R.x) / (2 * PI), acos(clamp(-R.z, -1.0, 1.0)) / PI);
 		vec3 irrCalc = texture(irradianceMap, irradianceN).xyz * 50;
 		vec3 diffuseFinal = Fd * irrCalc;
 
@@ -240,7 +240,8 @@ vec3 LightingPixel()
 		float D = DistributionGGX(HN, roughness);
 		float G = SmithMethod(VN, LN, roughness);
 		vec3 F = SchlickFresnel(HV, specular);
-		vec3 Fs = (F * G * D) / max(4.0 * RN * VN, 0.001);
+		vec3 Fs = (F * G * D) / max(4.0 * RN * VN, 0.01);
+		Fs = min(Fs, vec3(10.0));
 
 		vec3 totalBRDF = Fd + Fs;
 		vec3 directLight = totalBRDF * Light * LN;

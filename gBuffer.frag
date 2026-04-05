@@ -92,7 +92,7 @@ void main()
 		}
 		float VN = max(dot(V, N), 0.0);
 		vec3 R = V - 2.0 * VN * N;
-		uv = vec2(-atan(R.y, R.x) / (2 * PI), acos(R.z) / PI);
+		uv = vec2(-atan(R.y, R.x) / (2 * PI), acos(clamp(R.z, -1.0, 1.0)) / PI);
 	}
 
 	// Determine diffuse color (Kd)

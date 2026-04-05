@@ -65,8 +65,8 @@ std::vector<float> lightRanges;
 GLuint Bindpoint = 0;
 GLuint scratchpadTextureID;
 GLuint preBlurTextureID; // Debug: copy of shadow map before blur
-GLuint SHADOW_WIDTH = 1024;
-GLuint SHADOW_HEIGHT = 1024;
+GLuint SHADOW_WIDTH = 2048;
+GLuint SHADOW_HEIGHT = 2048;
 
 
 const float grndSize = 100.0;    // Island radius;  Minimum about 20;  Maximum 1000 or so
@@ -121,6 +121,27 @@ Object* SphereOfSpheres(Shape* SpherePolygons)
             float c = cos(row);
             ob->add(sp, Rotate(2,angle)*Translate(c,0,s)*Scale(0.075*c,0.075*c,0.075*c));
         }
+    return ob;
+}
+
+Object* OrbitingSpheres(Shape* SpherePolygons)
+{
+    Object* ob = new Object(NULL, nullId);
+    float radius = 3.0f;
+    float sphereScale = 0.60f;
+
+    float alphas[] = {1.0f, 5.0f, 20.0f, 50.0f, 200.0f, 2000.0f};
+    int count = 6;
+
+    for (int i = 0; i < count; i++) {
+        float angle = 360.0f * i / count;
+        glm::vec3 hue = HSV2RGB(float(i) / count, 0.8f, 1.0f);
+
+        Object* sp = new Object(SpherePolygons, spheresId,
+                                hue, glm::vec3(1.0, 1.0, 1.0), alphas[i], false, NULL, NULL);
+        ob->add(sp, Rotate(2, angle) * Translate(radius, 0, 0)
+                    * Scale(sphereScale, sphereScale, sphereScale));
+    }
     return ob;
 }
 
@@ -519,6 +540,8 @@ void Scene::InitializeScene()
     leftFrame  = FramedPicture(Identity, lPicId, BoxPolygons, QuadPolygons);
     rightFrame = FramedPicture(Identity, rPicId, BoxPolygons, QuadPolygons, rightFrameTexture); 
     spheres    = SphereOfSpheres(SpherePolygons);
+    orbitSpheres = OrbitingSpheres(SpherePolygons);
+    orbitAnim    = new Object(NULL, nullId);
 
     // Deferred rendering light sphere mesh
     lightVolumeSphere = CreateSphere(SpherePolygons);
@@ -559,6 +582,10 @@ void Scene::InitializeScene()
 
     if (fullPolyCount)
         anim->add(spheres, Translate(0.0, 0.0, 0.0)*Scale(16, 16, 16));
+
+    // Orbiting spheres around the teapot
+    central->add(orbitAnim, Translate(0.0, 0.0, 1.0));
+    orbitAnim->add(orbitSpheres);
     
     // Room contains two framed pictures
     if (fullPolyCount) {
@@ -582,8 +609,9 @@ void Scene::DrawMenu()
         if (ImGui::BeginMenu("Objects")) {
             if (ImGui::MenuItem("Draw spheres", "", spheres->drawMe))  {spheres->drawMe ^= true; }
             if (ImGui::MenuItem("Draw walls", "", room->drawMe))       {room->drawMe ^= true; }
-            if (ImGui::MenuItem("Draw ground/sea", "", ground->drawMe)){ground->drawMe ^= true;
-                							sea->drawMe = ground->drawMe;}
+            if (ImGui::MenuItem("Draw ground", "", ground->drawMe))     {ground->drawMe ^= true; }
+            if (ImGui::MenuItem("Draw sea", "", sea->drawMe))           {sea->drawMe ^= true; }
+            if (ImGui::MenuItem("Draw orbit spheres", "", orbitSpheres->drawMe)) {orbitSpheres->drawMe ^= true; }
             ImGui::EndMenu(); }
                 	
         // This menu demonstrates how to provide the user a choice
@@ -602,6 +630,9 @@ void Scene::DrawMenu()
             if (ImGui::MenuItem("Blur Comparison (split)", "",		mode==7)) { mode=7; }
             if (ImGui::MenuItem("SH Irradiance (surfaces)", "",		mode==8)) { mode=8; }
             if (ImGui::MenuItem("SH Irradiance (sky sphere)", "",	mode==9)) { mode=9; }
+            if (ImGui::MenuItem("<HDR views>", "",	false, false)) {}
+            if (ImGui::MenuItem("HDR Skybox", "",			mode==10)) { mode=10; }
+            if (ImGui::MenuItem("Irradiance Map (SH)", "",		mode==11)) { mode=11; }
             ImGui::EndMenu(); }
         
         ImGui::SameLine(ImGui::GetWindowWidth() - 100);
@@ -620,6 +651,7 @@ void Scene::DrawMenu()
     if (shadowLinstepLo >= shadowLinstepHi)
         shadowLinstepLo = shadowLinstepHi - 0.01f;
     ImGui::Checkbox("Point Lights", &enablePointLights);
+    ImGui::Checkbox("Direct Light", &enableDirectLight);
     ImGui::End();
 
     ImGui::Render();
@@ -722,6 +754,10 @@ void Scene::DrawScene()
     double atime = 360.0*glfwGetTime()/36;
     for (std::vector<Object*>::iterator m=animated.begin();  m<animated.end();  m++)
         (*m)->animTr = Rotate(2, atime);
+
+    // Orbit spheres rotation (around Z axis, faster than teapot)
+    double orbitTime = 360.0*glfwGetTime()/12;
+    orbitAnim->animTr = Rotate(2, orbitTime);
 
     rx = ry * width / height;
     BuildTransforms();
@@ -1056,6 +1092,9 @@ void Scene::CreateShader()
 
     loc = glGetUniformLocation(programId, "exposure");
     glUniform1f(loc, exposure);
+
+    loc = glGetUniformLocation(programId, "enableDirectLight");
+    glUniform1i(loc, enableDirectLight ? 1 : 0);
 
     CHECKERROR;
     fullScreenQuad->Draw(deferredLightProgram, Identity);

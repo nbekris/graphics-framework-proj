@@ -106,7 +106,7 @@ public:
     glm::vec3 shCoeffs[9];
 
     // IBL specular: Hammersley low-discrepancy sequence
-    int numSamples = 20;
+    int numSamples = 30;
     GLuint hammersleyUBO = 0;
     int skyHDRWidth = 0, skyHDRHeight = 0;
 
@@ -121,6 +121,10 @@ public:
     float exposure = 2.0f;
 
     bool enablePointLights = true;
+    bool enableDirectLight = true;
+    bool enableOrbitSpheres = true;
+
+    Object *orbitSpheres, *orbitAnim;
 
     // Options menu stuff
     bool show_demo_window;

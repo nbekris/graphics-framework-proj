@@ -51,7 +51,7 @@ void main()
         // Perform the convolution using shared memory
         vec4 result = vec4(0.0);
         for (int i = 0; i <= 2 * blurWidth; ++i) 
-        {
+        {g
             // We use weights[i].x to bypass the std140 padding
             result += v[lpos + i] * weights[i].x; 
         }

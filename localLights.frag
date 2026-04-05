@@ -100,7 +100,8 @@ void main() {
 	float D = DistributionGGX(HN, roughness);
 	float G = SmithMethod(VN, LN, roughness);
 	vec3 F = SchlickFresnel(HV, Specular);
-	vec3 Fs = (F * G * D) / max(4.0 * LN * VN, 0.001);
+	vec3 Fs = (F * G * D) / max(4.0 * LN * VN, 0.01);
+	Fs = min(Fs, vec3(10.0));
 
 	vec3 totalBRDF = Fd + Fs;
 	vec3 directLight = totalBRDF * lightColor * LN;
@@ -110,5 +111,6 @@ void main() {
 	float r2 = lightRadius * lightRadius; // radius squared
 	float attenuation = (1.0 / (d2 + 0.0001)) - (1.0 / r2);
     
-	FragColor = vec4(directLight * attenuation, 1.0);
+	vec3 result = clamp(directLight * attenuation, vec3(0.0), vec3(1.0));
+	FragColor = vec4(result, 1.0);
 }
