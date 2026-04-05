@@ -936,7 +936,7 @@ void Scene::CreateShader()
     // Top hemisphere
     reflectionTopFbo.BindFBO();
     glViewport(0, 0, reflectionTopFbo.width, reflectionTopFbo.height);
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClearColor(0.5f, 0.5f, 0.5f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     loc = glGetUniformLocation(programId, "ReflectDir");

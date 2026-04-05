@@ -110,8 +110,8 @@ void main()
 	}
 	if (objectId == groundId)
 		uv = texCoord * 100.0;
-	if (objectId == boxId && hasNormal > 0.5)
-		N = SetNormalMap(uv, T, B, N);
+	//if (objectId == boxId && hasNormal > 0.5)
+	//	N = SetNormalMap(uv, T, B, N);
 	if (objectId == seaId)
 	{
 		if (hasNormal > 0.5)

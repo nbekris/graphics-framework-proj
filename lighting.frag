@@ -146,10 +146,10 @@ vec3 LightingPixel()
 	{
 		uv = texCoord * 100.0;
 	}
-	if (objectId==boxId) 
-	{
-		N = SetNormalMap(uv, T, B, N);
-	}
+	//if (objectId==boxId)
+	//{
+	//	N = SetNormalMap(uv, T, B, N);
+	//}
 
 	float LN = max(dot(L, N), 0.0);
 	float HN = max(dot(H, N), 0.0);
