@@ -214,8 +214,10 @@ void ProjectSH(const float* image, int w, int h, glm::vec3 shCoeffs[9])
     float weightSum = 0.0f;
 
     for (int y = 0; y < h; y++) {
-        // theta = polar angle from top (0) to bottom (pi)
-        float theta = PI * (float(y) + 0.5f) / float(h);
+        // theta = polar angle from north pole (0) to south pole (pi)
+        // stbi_set_flip_vertically_on_load(true) makes y=0 the bottom row (south pole),
+        // so we invert: y=0 -> theta=pi, y=h-1 -> theta=0
+        float theta = PI * (1.0f - (float(y) + 0.5f) / float(h));
         float sinTheta = sin(theta);
         float cosTheta = cos(theta);
 
@@ -496,6 +498,8 @@ void Scene::InitializeScene()
     skyHDRWidth  = skyHDR->width;
     skyHDRHeight = skyHDR->height;
     skyHDR->FreePixels();
+
+
 
     // Build Hammersley low-discrepancy sequence for IBL specular
     {

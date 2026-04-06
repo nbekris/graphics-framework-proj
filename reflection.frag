@@ -99,23 +99,15 @@ void main()
 		mat2 rotation = mat2(cos(angle), -sin(angle),
 		                     sin(angle), cos(angle));
 		uv = rotation * (texCoord * 15.0);
-		if (hasNormal > 0.5)
-			N = SetNormalMap(uv, T, B, N);
 	}
 	if (objectId == floorId)
 	{
 		uv = texCoord * 2.0;
-		if (hasNormal > 0.5)
-			N = SetNormalMap(uv, T, B, N);
 	}
 	if (objectId == groundId)
 		uv = texCoord * 100.0;
-	//if (objectId == boxId && hasNormal > 0.5)
-	//	N = SetNormalMap(uv, T, B, N);
 	if (objectId == seaId)
 	{
-		if (hasNormal > 0.5)
-			N = SetNormalMap(uv * 30.0, T, B, N);
 		float VN = max(dot(V, N), 0.0);
 		vec3 R = V - 2.0 * VN * N;
 		uv = vec2(-atan(R.y, R.x) / (2 * PI), acos(clamp(R.z, -1.0, 1.0)) / PI);

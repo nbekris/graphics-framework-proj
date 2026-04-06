@@ -264,7 +264,7 @@ void main()
 
 		if (viewMode == 11)
 		{
-			// Debug: visualize SH irradiance map on sky sphere (should look like a blurred skybox)
+			// Debug: visualize SH irradiance map on sky sphere
 			vec3 irr = max(EvaluateSH(-V), vec3(0.0));
 			vec3 exposed = exposure * irr;
 			FragColor = vec4(pow(exposed / (exposed + vec3(1.0)), vec3(1.0/2.2)), 1.0);
