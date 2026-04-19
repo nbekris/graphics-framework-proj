@@ -38,6 +38,9 @@ using namespace gl;
 #include "HDR.h"
 #include "Texture.h"
 
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+
 const bool fullPolyCount = true; // Use false when emulating the graphics pipeline in software
 
 
@@ -275,6 +278,55 @@ void ProjectSH(const float* image, int w, int h, glm::vec3 shCoeffs[9])
         printf("  shCoeffs[%d] = (%.4f, %.4f, %.4f)\n", i, shCoeffs[i].x, shCoeffs[i].y, shCoeffs[i].z);
 }
 
+// Evaluate SH coefficients over a 400x200 equirectangular grid and save as HDR file
+void SaveIrradianceMap(const glm::vec3 shCoeffs[9], const char* filename)
+{
+    const int W = 400, H = 200;
+    std::vector<float> pixels(W * H * 3);
+
+    // SH basis constants (same as EvaluateSH in shader)
+    const float Y00  = 0.282095f;
+    const float Y1m  = 0.488603f;
+    const float Y2m2 = 1.092548f;
+    const float Y20  = 0.315392f;
+    const float Y22  = 0.546274f;
+
+    for (int j = 0; j < H; j++) {
+        float theta = PI * (float(j) + 0.5f) / float(H);   // 0=north pole, pi=south pole
+        float sinT = sin(theta);
+        float cosT = cos(theta);
+
+        for (int i = 0; i < W; i++) {
+            float phi = 2.0f * PI * (float(i) + 0.5f) / float(W);
+
+            float x = sinT * cos(phi);
+            float y = sinT * sin(phi);
+            float z = cosT;
+
+            // Evaluate SH (same formula as shader EvaluateSH)
+            glm::vec3 irr = shCoeffs[0] * Y00
+                          + shCoeffs[1] * Y1m * y
+                          + shCoeffs[2] * Y1m * z
+                          + shCoeffs[3] * Y1m * x
+                          + shCoeffs[4] * Y2m2 * x * y
+                          + shCoeffs[5] * Y2m2 * y * z
+                          + shCoeffs[6] * Y20  * (3.0f * z * z - 1.0f)
+                          + shCoeffs[7] * Y2m2 * x * z
+                          + shCoeffs[8] * Y22  * (x * x - y * y);
+
+            irr = glm::max(irr, glm::vec3(0.0f));
+
+            int idx = (j * W + i) * 3;
+            pixels[idx + 0] = irr.r;
+            pixels[idx + 1] = irr.g;
+            pixels[idx + 2] = irr.b;
+        }
+    }
+
+    stbi_write_hdr(filename, W, H, 3, pixels.data());
+    printf("Saved irradiance map: %s (%dx%d)\n", filename, W, H);
+}
+
 ////////////////////////////////////////////////////////////////////////
 // InitializeScene is called once during setup to create all the
 // textures, shape VAOs, and shader programs as well as setting a
@@ -358,8 +410,8 @@ void Scene::InitializeScene()
     
 	// Create Deferred Rendering shader program
     gBufferProgram = new ShaderProgram();
-	gBufferProgram->AddShader("gBuffer.vert", GL_VERTEX_SHADER);
-	gBufferProgram->AddShader("gBuffer.frag", GL_FRAGMENT_SHADER);
+	gBufferProgram->AddShader("glsl shaders/gBuffer.vert", GL_VERTEX_SHADER);
+	gBufferProgram->AddShader("glsl shaders/gBuffer.frag", GL_FRAGMENT_SHADER);
 	glBindAttribLocation(gBufferProgram->programId, 0, "vertex");
 	glBindAttribLocation(gBufferProgram->programId, 1, "vertexNormal");
 	glBindAttribLocation(gBufferProgram->programId, 2, "vertexTexture");
@@ -367,8 +419,8 @@ void Scene::InitializeScene()
 	gBufferProgram->LinkProgram();
 
 	deferredLightProgram = new ShaderProgram();
-	deferredLightProgram->AddShader("deferredLight.vert", GL_VERTEX_SHADER);
-	deferredLightProgram->AddShader("deferredLight.frag", GL_FRAGMENT_SHADER);
+	deferredLightProgram->AddShader("glsl shaders/deferredLight.vert", GL_VERTEX_SHADER);
+	deferredLightProgram->AddShader("glsl shaders/deferredLight.frag", GL_FRAGMENT_SHADER);
 	glBindAttribLocation(deferredLightProgram->programId, 0, "vertex");
 	glBindAttribLocation(deferredLightProgram->programId, 2, "vertexTexture");
 	deferredLightProgram->LinkProgram();
@@ -382,8 +434,8 @@ void Scene::InitializeScene()
     }
 
     localLightsProgram = new ShaderProgram();
-    localLightsProgram->AddShader("localLights.vert", GL_VERTEX_SHADER);
-    localLightsProgram->AddShader("localLights.frag", GL_FRAGMENT_SHADER);
+    localLightsProgram->AddShader("glsl shaders/localLights.vert", GL_VERTEX_SHADER);
+    localLightsProgram->AddShader("glsl shaders/localLights.frag", GL_FRAGMENT_SHADER);
     glBindAttribLocation(localLightsProgram->programId, 0, "vertex");
     localLightsProgram->LinkProgram();
 
@@ -391,9 +443,9 @@ void Scene::InitializeScene()
 	// reflection.vert does paraboloid projection + calls LightingVertex() from lighting.vert
 	// reflection.frag is self-contained with lighting matching deferredLight.frag
 	reflectionProgram = new ShaderProgram();
-	reflectionProgram->AddShader("reflection.vert", GL_VERTEX_SHADER);
-	reflectionProgram->AddShader("lighting.vert", GL_VERTEX_SHADER);
-	reflectionProgram->AddShader("reflection.frag", GL_FRAGMENT_SHADER);
+	reflectionProgram->AddShader("glsl shaders/reflection.vert", GL_VERTEX_SHADER);
+	reflectionProgram->AddShader("glsl shaders/lighting.vert", GL_VERTEX_SHADER);
+	reflectionProgram->AddShader("glsl shaders/reflection.frag", GL_FRAGMENT_SHADER);
 	glBindAttribLocation(reflectionProgram->programId, 0, "vertex");
 	glBindAttribLocation(reflectionProgram->programId, 1, "vertexNormal");
 	glBindAttribLocation(reflectionProgram->programId, 2, "vertexTexture");
@@ -402,8 +454,8 @@ void Scene::InitializeScene()
 
 	// Shadow Map Shader Program Initialization
     shadowProgram = new ShaderProgram();
-    shadowProgram->AddShader("shadow.frag", GL_FRAGMENT_SHADER);
-    shadowProgram->AddShader("shadow.vert", GL_VERTEX_SHADER);
+    shadowProgram->AddShader("glsl shaders/shadow.frag", GL_FRAGMENT_SHADER);
+    shadowProgram->AddShader("glsl shaders/shadow.vert", GL_VERTEX_SHADER);
     glBindAttribLocation(shadowProgram->programId, 0, "vertex");
     glBindAttribLocation(shadowProgram->programId, 1, "vertexNormal");
     glBindAttribLocation(shadowProgram->programId, 2, "vertexTexture");
@@ -412,7 +464,7 @@ void Scene::InitializeScene()
 
     // Compute Blur Shader Program
     computeBlurShader = new ShaderProgram();
-    computeBlurShader->AddShader("blur.comp", GL_COMPUTE_SHADER);
+    computeBlurShader->AddShader("glsl shaders/blur.comp", GL_COMPUTE_SHADER);
     computeBlurShader->LinkProgram();
 
     // Scratchpad texture for ping-pong blur (same size/format as shadow FBO)
@@ -495,6 +547,7 @@ void Scene::InitializeScene()
 
     HDR* skyHDR = new HDR("skys/Road_to_MonumentValley_Ref.hdr", true);
     ProjectSH(skyHDR->image, skyHDR->width, skyHDR->height, shCoeffs);
+    SaveIrradianceMap(shCoeffs, "irradiance_map.hdr");
     skyHDRWidth  = skyHDR->width;
     skyHDRHeight = skyHDR->height;
     skyHDR->FreePixels();
