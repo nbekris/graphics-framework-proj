@@ -1,0 +1,125 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="fbo.cpp" />
+    <ClCompile Include="framework.cpp" />
+    <ClCompile Include="HDR.cpp" />
+    <ClCompile Include="libs\imgui-master\backends\imgui_impl_glfw.cpp" />
+    <ClCompile Include="libs\imgui-master\backends\imgui_impl_opengl3.cpp" />
+    <ClCompile Include="libs\imgui-master\imgui.cpp" />
+    <ClCompile Include="libs\imgui-master\imgui_demo.cpp" />
+    <ClCompile Include="libs\imgui-master\imgui_draw.cpp" />
+    <ClCompile Include="libs\imgui-master\imgui_widgets.cpp" />
+    <ClCompile Include="rply.c" />
+    <ClCompile Include="scene.cpp" />
+    <ClCompile Include="shader.cpp" />
+    <ClCompile Include="texture.cpp" />
+    <ClCompile Include="interact.cpp" />
+    <ClCompile Include="object.cpp" />
+    <ClCompile Include="shapes.cpp" />
+    <ClCompile Include="simplexnoise.cpp" />
+    <ClCompile Include="transform.cpp" />
+    <ClCompile Include="emulator.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="emulator.h" />
+    <ClInclude Include="fbo.h" />
+    <ClInclude Include="framework.h" />
+    <ClInclude Include="HDR.h" />
+    <ClInclude Include="interact.h" />
+    <ClInclude Include="object.h" />
+    <ClInclude Include="rply.h" />
+    <ClInclude Include="scene.h" />
+    <ClInclude Include="shader.h" />
+    <ClInclude Include="shapes.h" />
+    <ClInclude Include="simplexnoise.h" />
+    <ClInclude Include="texture.h" />
+    <ClInclude Include="transform.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Library Include="libs\glfw\lib-vc2019\glfw3.lib" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include=".gitignore" />
+    <None Include="imgui.ini" />
+    <None Include="Makefile" />
+    <None Include="package-lock.json" />
+    <None Include="package.json" />
+    <None Include="Project2_MSM_Report.docx" />
+    <None Include="Project3-IBL-Report.docx" />
+    <None Include="Project3_IBL.zip" />
+    <None Include="Project3_IBL_Report.docx" />
+    <None Include="room.ply" />
+    <None Include="glsl shaders\deferredLight.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\blur.comp">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\deferredLight.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\final.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\final.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\gBuffer.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\gBuffer.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl deferredLight.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="irradiance_map.hdr">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\lighting.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\lighting.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\localLights.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\localLights.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\reflection.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\reflectionBottom.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\reflection.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\reflectionBottom.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\shadow.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\shadow.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\SSAO.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\SSAO.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\ssaoBlur.comp">
+      <Filter>Shaders</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Shaders">
+      <UniqueIdentifier>{ad09d91a-8b16-4a1a-a666-16e068e8383a}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

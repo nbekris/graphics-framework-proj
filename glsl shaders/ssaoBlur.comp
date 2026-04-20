@@ -1,0 +1,158 @@
+#version 430 core
+
+layout (local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+// AO image bindings (RGBA32F)
+layout (rgba32f, binding = 0) uniform readonly  image2D src;
+layout (rgba32f, binding = 1) uniform writeonly image2D dst;
+
+// G-buffer textures for bilateral range kernel (RGBA16F, read via sampler)
+uniform sampler2D gPositionTex;  // gFragData[0]: worldPos.xyz
+uniform sampler2D gNormalTex;    // gFragData[1]: normal.xyz, emissiveFlag in .a
+
+uniform mat4 WorldView;
+uniform int blurWidth;           // kernel half-width
+uniform ivec2 blurDirection;     // (1,0) horizontal, (0,1) vertical
+
+const float PI = 3.14159265359;
+const float rangeVariance = 0.01;
+
+// Shared memory for horizontal pass: AO value, normal, depth per texel
+// Max blurWidth = 20, so apron = 2*20 = 40, total = 128 + 40 = 168
+shared float s_ao[128 + 2 * 20];
+shared vec3  s_normal[128 + 2 * 20];
+shared float s_depth[128 + 2 * 20];
+
+// Helper: compute camera-space depth from world position
+float viewDepth(vec3 worldPos)
+{
+    return -(WorldView * vec4(worldPos, 1.0)).z;
+}
+
+void main()
+{
+    ivec2 gpos = ivec2(gl_GlobalInvocationID.xy);
+    uint  lpos = gl_LocalInvocationIndex; // 0..127
+    ivec2 imgSize = imageSize(src);
+
+    float rangePrefactor = 1.0 / sqrt(2.0 * PI * rangeVariance);
+
+    // -----------------------------------------------------------------
+    // HORIZONTAL PASS (shared memory optimization)
+    // -----------------------------------------------------------------
+    if (blurDirection.x == 1)
+    {
+        // Load pixel shifted left by blurWidth into shared memory
+        ivec2 readPos = clamp(gpos - ivec2(blurWidth, 0), ivec2(0), imgSize - ivec2(1));
+        s_ao[lpos] = imageLoad(src, readPos).r;
+        vec4 normData = texelFetch(gNormalTex, readPos, 0);
+        s_normal[lpos] = normalize(normData.rgb);
+        vec3 posData = texelFetch(gPositionTex, readPos, 0).rgb;
+        s_depth[lpos] = viewDepth(posData);
+
+        // Load extra apron pixels at the end of the block
+        if (lpos < 2 * blurWidth)
+        {
+            ivec2 extraPos = clamp(gpos + ivec2(128 - blurWidth, 0), ivec2(0), imgSize - ivec2(1));
+            s_ao[lpos + 128] = imageLoad(src, extraPos).r;
+            vec4 normExtra = texelFetch(gNormalTex, extraPos, 0);
+            s_normal[lpos + 128] = normalize(normExtra.rgb);
+            vec3 posExtra = texelFetch(gPositionTex, extraPos, 0).rgb;
+            s_depth[lpos + 128] = viewDepth(posExtra);
+        }
+
+        barrier();
+
+        if (gpos.x >= imgSize.x || gpos.y >= imgSize.y) return;
+
+        // Check emissive flag at center pixel — pass through sky pixels
+        float emissiveFlag = texelFetch(gNormalTex, gpos, 0).a;
+        if (emissiveFlag < 0.5)
+        {
+            imageStore(dst, gpos, vec4(s_ao[lpos + blurWidth]));
+            return;
+        }
+
+        // Center pixel values from shared memory
+        float centerDepth = s_depth[lpos + blurWidth];
+        vec3 centerNormal = s_normal[lpos + blurWidth];
+
+        float spatialSigma = max(float(blurWidth) / 2.0, 0.5);
+        float sumWeighted = 0.0;
+        float sumWeights = 0.0;
+
+        for (int i = 0; i <= 2 * blurWidth; i++)
+        {
+            float aoVal = s_ao[lpos + i];
+            vec3  ni    = s_normal[lpos + i];
+            float di    = s_depth[lpos + i];
+
+            // Spatial kernel
+            float dist = float(i - blurWidth);
+            float spatialW = exp(-0.5 * dist * dist / (spatialSigma * spatialSigma));
+
+            // Range kernel: normal similarity * depth Gaussian
+            float normalW = max(0.0, dot(ni, centerNormal));
+            float depthDiff = di - centerDepth;
+            float depthW = rangePrefactor * exp(-depthDiff * depthDiff / (2.0 * rangeVariance));
+
+            float W = spatialW * normalW * depthW;
+            sumWeighted += W * aoVal;
+            sumWeights += W;
+        }
+
+        float result = (sumWeights > 0.0) ? sumWeighted / sumWeights : s_ao[lpos + blurWidth];
+        imageStore(dst, gpos, vec4(result, result, result, 1.0));
+    }
+    // -----------------------------------------------------------------
+    // VERTICAL PASS (direct reads — no shared memory benefit along Y)
+    // -----------------------------------------------------------------
+    else
+    {
+        if (gpos.x >= imgSize.x || gpos.y >= imgSize.y) return;
+
+        // Check emissive flag — pass through sky pixels
+        float emissiveFlag = texelFetch(gNormalTex, gpos, 0).a;
+        float centerAO = imageLoad(src, gpos).r;
+        if (emissiveFlag < 0.5)
+        {
+            imageStore(dst, gpos, vec4(centerAO));
+            return;
+        }
+
+        vec3  centerNormal = normalize(texelFetch(gNormalTex, gpos, 0).rgb);
+        vec3  centerPos    = texelFetch(gPositionTex, gpos, 0).rgb;
+        float centerDepth  = viewDepth(centerPos);
+
+        float spatialSigma = max(float(blurWidth) / 2.0, 0.5);
+        float rangePrefactor_v = 1.0 / sqrt(2.0 * PI * rangeVariance);
+
+        float sumWeighted = 0.0;
+        float sumWeights = 0.0;
+
+        for (int i = -blurWidth; i <= blurWidth; i++)
+        {
+            ivec2 samplePos = clamp(gpos + ivec2(0, i), ivec2(0), imgSize - ivec2(1));
+
+            float aoVal = imageLoad(src, samplePos).r;
+            vec3  ni    = normalize(texelFetch(gNormalTex, samplePos, 0).rgb);
+            vec3  pi    = texelFetch(gPositionTex, samplePos, 0).rgb;
+            float di    = viewDepth(pi);
+
+            // Spatial kernel
+            float spatialW = exp(-0.5 * float(i * i) / (spatialSigma * spatialSigma));
+
+            // Range kernel
+            float normalW = max(0.0, dot(ni, centerNormal));
+            float depthDiff = di - centerDepth;
+            float depthW = rangePrefactor_v * exp(-depthDiff * depthDiff / (2.0 * rangeVariance));
+
+            float W = spatialW * normalW * depthW;
+            sumWeighted += W * aoVal;
+            sumWeights += W;
+        }
+
+        float result = (sumWeights > 0.0) ? sumWeighted / sumWeights : centerAO;
+        imageStore(dst, gpos, vec4(result, result, result, 1.0));
+    }
+}

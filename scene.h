@@ -92,6 +92,8 @@ public:
     ShaderProgram* deferredLightProgram;
     ShaderProgram* localLightsProgram;
     ShaderProgram* computeBlurShader;
+    ShaderProgram* ssaoProgram;
+    ShaderProgram* ssaoBlurProgram;
 
     // Blur parameters
     int blurWidth;
@@ -123,6 +125,13 @@ public:
     bool enablePointLights = true;
     bool enableDirectLight = true;
     bool enableOrbitSpheres = true;
+
+    // SSAO parameters
+    float ssaoRadius = 1.0f;       // R - range of influence (world units)
+    float ssaoScale = 1.0f;        // s - scale factor
+    float ssaoContrast = 1.0f;     // k - contrast (power) factor
+    int ssaoNumSamples = 16;       // n - number of sample points
+    int ssaoBlurRadius = 6;        // bilateral blur kernel half-width
 
     Object *orbitSpheres, *orbitAnim;
 

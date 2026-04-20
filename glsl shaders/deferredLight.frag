@@ -12,6 +12,7 @@ uniform sampler2D preBlurShadowMap;
 uniform sampler2D skyboxMap;
 uniform sampler2D reflectionTop;
 uniform sampler2D reflectionBottom;
+uniform sampler2D ssaoTex;
 uniform vec3 shCoeffs[9];
 uniform mat4 ShadowMatrix;
 
@@ -396,7 +397,9 @@ void main()
 
 	vec3 totalBRDF = Fd + Fs;
 	vec3 directLight = (enableDirectLight == 1) ? totalBRDF * lightColor * LN : vec3(0.0);
-	vec3 ambient = diffuseIBL + specularIBL;
+	// Apply SSAO: AO modulates ambient light only, not direct light
+	float ao = texture(ssaoTex, uv).r;
+	vec3 ambient = ao * (diffuseIBL + specularIBL);
 
 	// MSM shadow: G is shadow intensity (0=lit, 1=shadowed)
 	// Lighting = ambient + (1-G) * [diffuse + specular]
@@ -513,6 +516,12 @@ void main()
 		vec3 irr = max(EvaluateSH(N), vec3(0.0));
 		vec3 exposed = exposure * irr;
 		FragColor = vec4(pow(exposed / (exposed + vec3(1.0)), vec3(1.0/2.2)), 1.0);
+		return;
+	}
+	else if (viewMode == 12)
+	{
+		// Debug: visualize SSAO factor (white=no occlusion, black=fully occluded)
+		FragColor = vec4(vec3(ao), 1.0);
 		return;
 	}
 

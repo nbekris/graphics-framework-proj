@@ -171,6 +171,7 @@
     <None Include="glsl shaders\shadow.vert" />
     <None Include="glsl shaders\SSAO.frag" />
     <None Include="glsl shaders\SSAO.vert" />
+    <None Include="glsl shaders\ssaoBlur.comp" />
     <None Include="imgui.ini" />
     <None Include="irradiance_map.hdr" />
     <None Include="Makefile" />

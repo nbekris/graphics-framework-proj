@@ -58,6 +58,8 @@ FBO shadowFbo;
 FBO reflectionTopFbo;
 FBO reflectionBottomFbo;
 FBO gBufferFbo;
+FBO ssaoFbo;
+GLuint ssaoScratchpadTextureID;
 
 // Many local light values
 std::vector<glm::vec3> lightPositions;
@@ -407,7 +409,18 @@ void Scene::InitializeScene()
 	reflectionTopFbo.CreateFBO(1024, 1024);
 	reflectionBottomFbo.CreateFBO(1024, 1024);
 	gBufferFbo.CreateGBuffer(750, 750);
-    
+	ssaoFbo.CreateFBO(750, 750);
+
+    // Scratchpad texture for SSAO bilateral blur compute shader ping-pong
+    glGenTextures(1, &ssaoScratchpadTextureID);
+    glBindTexture(GL_TEXTURE_2D, ssaoScratchpadTextureID);
+    glTexImage2D(GL_TEXTURE_2D, 0, (int)GL_RGBA32F, 750, 750, 0, GL_RGBA, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (int)GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (int)GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (int)GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (int)GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
 	// Create Deferred Rendering shader program
     gBufferProgram = new ShaderProgram();
 	gBufferProgram->AddShader("glsl shaders/gBuffer.vert", GL_VERTEX_SHADER);
@@ -438,6 +451,20 @@ void Scene::InitializeScene()
     localLightsProgram->AddShader("glsl shaders/localLights.frag", GL_FRAGMENT_SHADER);
     glBindAttribLocation(localLightsProgram->programId, 0, "vertex");
     localLightsProgram->LinkProgram();
+
+    // SSAO shader program (reuses deferredLight.vert)
+    ssaoProgram = new ShaderProgram();
+    ssaoProgram->AddShader("glsl shaders/deferredLight.vert", GL_VERTEX_SHADER);
+    ssaoProgram->AddShader("glsl shaders/SSAO.frag", GL_FRAGMENT_SHADER);
+    glBindAttribLocation(ssaoProgram->programId, 0, "vertex");
+    glBindAttribLocation(ssaoProgram->programId, 2, "vertexTexture");
+    ssaoProgram->LinkProgram();
+
+    // SSAO bilateral blur shader program (reuses deferredLight.vert)
+    // SSAO bilateral blur compute shader
+    ssaoBlurProgram = new ShaderProgram();
+    ssaoBlurProgram->AddShader("glsl shaders/ssaoBlur.comp", GL_COMPUTE_SHADER);
+    ssaoBlurProgram->LinkProgram();
 
 	// Reflection Shader Program (dual-paraboloid, forward lighting)
 	// reflection.vert does paraboloid projection + calls LightingVertex() from lighting.vert
@@ -690,6 +717,8 @@ void Scene::DrawMenu()
             if (ImGui::MenuItem("<HDR views>", "",	false, false)) {}
             if (ImGui::MenuItem("HDR Skybox", "",			mode==10)) { mode=10; }
             if (ImGui::MenuItem("Irradiance Map (SH)", "",		mode==11)) { mode=11; }
+            if (ImGui::MenuItem("<SSAO views>", "",	false, false)) {}
+            if (ImGui::MenuItem("SSAO Factor", "",			mode==12)) { mode=12; }
             ImGui::EndMenu(); }
         
         ImGui::SameLine(ImGui::GetWindowWidth() - 100);
@@ -697,7 +726,7 @@ void Scene::DrawMenu()
         ImGui::EndMainMenuBar(); }
 
     ImGui::SetNextWindowPos(ImVec2(10, 30), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2(300, 160), ImGuiCond_Once);
+    ImGui::SetNextWindowSize(ImVec2(300, 320), ImGuiCond_Once);
     ImGui::SetNextWindowCollapsed(true, ImGuiCond_Once);
     ImGui::Begin("Settings");
     ImGui::SliderFloat("Exposure", &exposure, 0.1f, 10000.0f, "%.1f", ImGuiSliderFlags_Logarithmic);
@@ -709,6 +738,13 @@ void Scene::DrawMenu()
         shadowLinstepLo = shadowLinstepHi - 0.01f;
     ImGui::Checkbox("Point Lights", &enablePointLights);
     ImGui::Checkbox("Direct Light", &enableDirectLight);
+    ImGui::Separator();
+    ImGui::Text("SSAO");
+    ImGui::SliderFloat("AO Radius", &ssaoRadius, 0.1f, 5.0f, "%.2f");
+    ImGui::SliderFloat("AO Scale", &ssaoScale, 0.1f, 5.0f, "%.2f");
+    ImGui::SliderFloat("AO Contrast", &ssaoContrast, 0.1f, 5.0f, "%.2f");
+    ImGui::SliderInt("AO Samples", &ssaoNumSamples, 4, 64);
+    ImGui::SliderInt("AO Blur Radius", &ssaoBlurRadius, 0, 20);
     ImGui::End();
 
     ImGui::Render();
@@ -1062,9 +1098,114 @@ void Scene::CreateShader()
     gBufferProgram->UnuseShader();
     gBufferFbo.UnbindFBO();
 
+    // -----------------------------------------------------------------
+    // SSAO Pass - Compute ambient occlusion from G-buffer
+    // -----------------------------------------------------------------
+
+    // Disable depth test for all full-screen quad passes (SSAO + blur)
+    glDisable(GL_DEPTH_TEST);
+
+    ssaoFbo.BindFBO();
+    glViewport(0, 0, 750, 750);
+    glClearColor(1.0f, 1.0f, 1.0f, 1.0f); // Default: no occlusion
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    ssaoProgram->UseShader();
+    programId = ssaoProgram->programId;
+
+    // Bind G-buffer position and normal textures
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, gBufferFbo.gFragData[0]);
+    loc = glGetUniformLocation(programId, "gPositionTex");
+    glUniform1i(loc, 0);
+
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, gBufferFbo.gFragData[1]);
+    loc = glGetUniformLocation(programId, "gNormalTex");
+    glUniform1i(loc, 1);
+
+    loc = glGetUniformLocation(programId, "WorldView");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldView));
+
+    loc = glGetUniformLocation(programId, "width");
+    glUniform1f(loc, 750.0f);
+    loc = glGetUniformLocation(programId, "height");
+    glUniform1f(loc, 750.0f);
+
+    loc = glGetUniformLocation(programId, "radius");
+    glUniform1f(loc, ssaoRadius);
+    loc = glGetUniformLocation(programId, "ssaoScale");
+    glUniform1f(loc, ssaoScale);
+    loc = glGetUniformLocation(programId, "contrast");
+    glUniform1f(loc, ssaoContrast);
+    loc = glGetUniformLocation(programId, "numSamples");
+    glUniform1i(loc, ssaoNumSamples);
+
+    CHECKERROR;
+    fullScreenQuad->Draw(ssaoProgram, Identity);
+    CHECKERROR;
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    ssaoProgram->UnuseShader();
+    ssaoFbo.UnbindFBO();
 
     // -----------------------------------------------------------------
-    // Lighting Pass
+    // SSAO Bilateral Blur - Compute shader (H then V)
+    // -----------------------------------------------------------------
+
+    ssaoBlurProgram->UseShader();
+    programId = ssaoBlurProgram->programId;
+
+    loc = glGetUniformLocation(programId, "WorldView");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldView));
+    loc = glGetUniformLocation(programId, "blurWidth");
+    glUniform1i(loc, ssaoBlurRadius);
+
+    // Bind G-buffer textures as samplers for the range kernel
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, gBufferFbo.gFragData[0]);
+    loc = glGetUniformLocation(programId, "gPositionTex");
+    glUniform1i(loc, 0);
+
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, gBufferFbo.gFragData[1]);
+    loc = glGetUniformLocation(programId, "gNormalTex");
+    glUniform1i(loc, 1);
+
+    // --- Horizontal blur: ssaoFbo -> scratchpad ---
+    glBindImageTexture(0, ssaoFbo.textureID, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    glBindImageTexture(1, ssaoScratchpadTextureID, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+    loc = glGetUniformLocation(programId, "blurDirection");
+    glUniform2i(loc, 1, 0);
+
+    glDispatchCompute((750 + 127) / 128, 750, 1);
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+
+    // --- Vertical blur: scratchpad -> ssaoFbo ---
+    glBindImageTexture(0, ssaoScratchpadTextureID, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    glBindImageTexture(1, ssaoFbo.textureID, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+    loc = glGetUniformLocation(programId, "blurDirection");
+    glUniform2i(loc, 0, 1);
+
+    glDispatchCompute((750 + 127) / 128, 750, 1);
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    ssaoBlurProgram->UnuseShader();
+
+    // Re-enable depth test for subsequent passes
+    glEnable(GL_DEPTH_TEST);
+
+    // -----------------------------------------------------------------
+    // Deferred Lighting Pass
     // Render a full-screen quad and calculate lighting per-pixel
     // -----------------------------------------------------------------
 
@@ -1088,6 +1229,9 @@ void Scene::CreateShader()
     sky->texture->BindTexture(10, programId, "skyboxMap");
     reflectionTopFbo.BindTexture(12, programId, "reflectionTop");
     reflectionBottomFbo.BindTexture(13, programId, "reflectionBottom");
+
+    // Bind SSAO texture (blurred result is in ssaoFbo after V blur pass)
+    ssaoFbo.BindTexture(14, programId, "ssaoTex");
 
     // Upload SH coefficients for diffuse IBL
     loc = glGetUniformLocation(programId, "shCoeffs");
@@ -1162,6 +1306,7 @@ void Scene::CreateShader()
 	sky->texture->UnbindTexture(10);
 	reflectionTopFbo.UnbindTexture(12);
 	reflectionBottomFbo.UnbindTexture(13);
+	ssaoFbo.UnbindTexture(14);
 
     glActiveTexture(GL_TEXTURE9);
     glBindTexture(GL_TEXTURE_2D, 0);
