@@ -39,6 +39,10 @@ public:
     // --- G-Buffer methods ---
     void CreateGBuffer(const int w, const int h);
 
+    // --- Snow particle ping-pong FBO (2 RGBA32F color attachments) ---
+    // gFragData[0] = positions, gFragData[1] = velocities
+    void CreateDualFBO(const int w, const int h);
+
     // Helper to bind all 3 textures at once for the lighting pass
     void BindGBufferTextures(int startUnit, int programId,
         std::string fragDataName, std::string lightVecName, std::string eyeVecName);

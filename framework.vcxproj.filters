@@ -116,6 +116,18 @@
     <None Include="glsl shaders\ssaoBlur.comp">
       <Filter>Shaders</Filter>
     </None>
+    <None Include="glsl shaders\snowRender.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\snowRender.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\snowUpdate.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="glsl shaders\snowUpdate.vert">
+      <Filter>Shaders</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Shaders">

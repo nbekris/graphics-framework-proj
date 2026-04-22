@@ -40,6 +40,11 @@ uniform sampler2D normalTex;
 uniform float hasNormal;
 uniform bool reflective;
 
+// Snow deposition (Paper Section IV)
+uniform sampler2D snowHeightTex; // R32F height field covering scene XY [-100,100]
+uniform float     snowScale;     // maps raw height to [0,1] blend weight
+uniform int       snowEnabled;
+
 vec3 SetNormalMap(vec2 uv, vec3 T, vec3 B, vec3 N)
 {
 	vec3 delta;
@@ -129,6 +134,28 @@ void main()
 		Kd = texture(tex, uv).rgb;
 	}
 
+	// Local copies so snow blending can modify them
+	vec3  Ks    = specular;
+	float alpha = shininess;
+
+	// Snow deposition — blend snow material onto upward-facing surfaces
+	// (Paper Section IV: height field controls coverage; N.z encodes "faces sky"
+	//  since Z is the up axis in this scene.)
+	if (snowEnabled != 0 && (objectId == groundId || objectId == floorId)) {
+		// Map world XY [-100, 100] to UV [0, 1]
+		vec2  gridUV  = clamp((worldPos.xy / 100.0) * 0.5 + 0.5, 0.0, 1.0);
+		float snowAmt = texture(snowHeightTex, gridUV).r * snowScale;
+
+		// Surfaces facing more toward +Z accumulate more snow
+		float upFactor = clamp(N.z, 0.0, 1.0);
+		snowAmt = clamp(snowAmt * upFactor, 0.0, 1.0);
+
+		vec3 snowColor = vec3(0.95, 0.97, 1.0);
+		Kd    = mix(Kd,    snowColor,               snowAmt);
+		Ks    = mix(Ks,    vec3(0.01, 0.01, 0.01),  snowAmt);
+		alpha = mix(alpha, 0.05,                     snowAmt);
+	}
+
 	// Store G-buffer data
 	// FragData[0].a = objectId (for deferred lighting pass)
 	FragData[0] = vec4(worldPos, float(objectId));
@@ -140,7 +167,7 @@ void main()
 	// FragData[2].a = reflective flag (1.0 if reflective)
 	FragData[2] = vec4(Kd, reflective ? 1.0 : 0.0);
 
-	FragData[3] = vec4(specular, shininess);
+	FragData[3] = vec4(Ks, alpha);
 
 	LightVec = normalize(lightPos - worldPos);
 	EyeVec   = normalize(viewPos - worldPos);

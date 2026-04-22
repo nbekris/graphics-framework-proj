@@ -59,6 +59,8 @@ FBO reflectionTopFbo;
 FBO reflectionBottomFbo;
 FBO gBufferFbo;
 FBO ssaoFbo;
+FBO snowFboA;   // particle ping-pong A (gFragData[0]=pos, gFragData[1]=vel)
+FBO snowFboB;   // particle ping-pong B
 GLuint ssaoScratchpadTextureID;
 
 // Many local light values
@@ -80,6 +82,8 @@ const float grndFreq = 0.03;    // Number of hills per (approx) 50m
 const float grndPersistence = 0.03; // Terrain roughness: Slight:0.01  rough:0.05
 const float grndLow = -3.0;         // Lowest extent below sea level
 const float grndHigh = 5.0;        // Highest extent above sea level
+
+const float snowSpawnHeight = 150.0f; // Z height at which snow particles are born
 
 const bool showSpheres = true;
 
@@ -330,6 +334,61 @@ void SaveIrradianceMap(const glm::vec3 shCoeffs[9], const char* filename)
 }
 
 ////////////////////////////////////////////////////////////////////////
+// UpdateSnowDeposition — CPU implementation of the paper's three
+// deposition rules (Paper Section IV).  Called once per frame.
+// Adds a small uniform accumulation then relaxes the height field so
+// snow rolls from peaks into valleys, matching the paper's rules:
+//   Rule 1: cell <= all neighbors  →  stable, deposit in place.
+//   Rule 2: cell > all neighbors, neighbors equal  →  roll to random neighbor.
+//   Rule 3: cell > some neighbors  →  roll equally to all lower neighbors.
+////////////////////////////////////////////////////////////////////////
+void Scene::UpdateSnowDeposition()
+{
+    const float threshold = 0.05f; // height difference that triggers rolling
+
+    // Add a uniform thin layer each frame (simulates snowfall from above)
+    for (int x = 1; x < SNOW_GRID_SIZE - 1; x++)
+        for (int y = 1; y < SNOW_GRID_SIZE - 1; y++)
+            snowHeight[x][y] += snowAccumRate;
+
+    // Relaxation pass: apply the three deposition rules
+    for (int x = 1; x < SNOW_GRID_SIZE - 1; x++) {
+        for (int y = 1; y < SNOW_GRID_SIZE - 1; y++) {
+            float h = snowHeight[x][y];
+
+            int   dx[4] = { -1,  1,  0,  0 };
+            int   dy[4] = {  0,  0, -1,  1 };
+            float nh[4] = {
+                snowHeight[x-1][y], snowHeight[x+1][y],
+                snowHeight[x][y-1], snowHeight[x][y+1]
+            };
+
+            // Collect lower neighbors (Rule 2 / Rule 3)
+            int lower[4], lowerCount = 0;
+            for (int i = 0; i < 4; i++)
+                if (nh[i] < h - threshold)
+                    lower[lowerCount++] = i;
+
+            if (lowerCount == 0) continue; // Rule 1 — stable
+
+            // Transfer a small amount equally to all lower neighbors
+            float rollAmt = snowAccumRate * 2.0f;
+            snowHeight[x][y] -= rollAmt;
+            float share = rollAmt / (float)lowerCount;
+            for (int i = 0; i < lowerCount; i++)
+                snowHeight[x + dx[lower[i]]][y + dy[lower[i]]] += share;
+        }
+    }
+
+    // Upload the updated height field to the GPU texture
+    glBindTexture(GL_TEXTURE_2D, snowHeightTex);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
+                    SNOW_GRID_SIZE, SNOW_GRID_SIZE,
+                    GL_RED, GL_FLOAT, snowHeight);
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+////////////////////////////////////////////////////////////////////////
 // InitializeScene is called once during setup to create all the
 // textures, shape VAOs, and shader programs as well as setting a
 // number of other parameters.
@@ -410,6 +469,77 @@ void Scene::InitializeScene()
 	reflectionBottomFbo.CreateFBO(1024, 1024);
 	gBufferFbo.CreateGBuffer(750, 750);
 	ssaoFbo.CreateFBO(750, 750);
+
+    // ----------------------------------------------------------------
+    // Snow particle system — Paper: "Rendering Snowing Scene on GPU"
+    // ----------------------------------------------------------------
+
+    // Two ping-pong FBOs, each with pos (gFragData[0]) + vel (gFragData[1])
+    snowFboA.CreateDualFBO(SNOW_TEX_SIZE, SNOW_TEX_SIZE);
+    snowFboB.CreateDualFBO(SNOW_TEX_SIZE, SNOW_TEX_SIZE);
+    snowPingPong = false;
+
+    // Initialise particles at random positions scattered across the scene
+    // (the update shader will immediately start simulating them)
+    {
+        const int N = SNOW_TEX_SIZE * SNOW_TEX_SIZE;
+        std::vector<glm::vec4> initPos(N), initVel(N);
+        srand(42);
+        for (int i = 0; i < N; i++) {
+            float rx = ((float)rand() / RAND_MAX) * 2.0f - 1.0f; // [-1,1]
+            float ry = ((float)rand() / RAND_MAX) * 2.0f - 1.0f;
+            float rz = (float)rand() / RAND_MAX;                  // [0,1]
+            // Spread vertically so not all particles arrive at once
+            initPos[i] = glm::vec4(rx * grndSize,
+                                   ry * grndSize,
+                                   grndLow + rz * (snowSpawnHeight - grndLow),
+                                   1.0f);
+            initVel[i] = glm::vec4(0.0f);
+        }
+        glBindTexture(GL_TEXTURE_2D, snowFboA.gFragData[0]);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
+                        SNOW_TEX_SIZE, SNOW_TEX_SIZE, GL_RGBA, GL_FLOAT, initPos.data());
+        glBindTexture(GL_TEXTURE_2D, snowFboA.gFragData[1]);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
+                        SNOW_TEX_SIZE, SNOW_TEX_SIZE, GL_RGBA, GL_FLOAT, initVel.data());
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    // Snow height field texture (R32F, covers [-grndSize, grndSize] in XY)
+    // Allocate on the heap and zero-initialise (the () suffix does value-init)
+    snowHeight = new float[SNOW_GRID_SIZE][SNOW_GRID_SIZE]();
+    glGenTextures(1, &snowHeightTex);
+    glBindTexture(GL_TEXTURE_2D, snowHeightTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, (int)GL_R32F,
+                 SNOW_GRID_SIZE, SNOW_GRID_SIZE, 0, GL_RED, GL_FLOAT, snowHeight);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (int)GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (int)GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,     (int)GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,     (int)GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // Dummy VAO — OpenGL Core profile requires a bound VAO for every draw call,
+    // even when vertex data comes entirely from gl_VertexID + texture fetches.
+    glGenVertexArrays(1, &snowDummyVAO);
+
+    // Tuning defaults
+    snowWind        = glm::vec3(0.3f, 0.1f, 0.0f);
+    snowParticleSize = 4.0f;
+    snowAccumRate   = 0.00005f;
+    enableSnow      = true;
+
+    // Compile snow shader programs
+    snowUpdateProgram = new ShaderProgram();
+    snowUpdateProgram->AddShader("glsl shaders/snowUpdate.vert", GL_VERTEX_SHADER);
+    snowUpdateProgram->AddShader("glsl shaders/snowUpdate.frag", GL_FRAGMENT_SHADER);
+    glBindAttribLocation(snowUpdateProgram->programId, 0, "vertex");
+    glBindAttribLocation(snowUpdateProgram->programId, 2, "vertexTexture");
+    snowUpdateProgram->LinkProgram();
+
+    snowRenderProgram = new ShaderProgram();
+    snowRenderProgram->AddShader("glsl shaders/snowRender.vert", GL_VERTEX_SHADER);
+    snowRenderProgram->AddShader("glsl shaders/snowRender.frag", GL_FRAGMENT_SHADER);
+    snowRenderProgram->LinkProgram();
 
     // Scratchpad texture for SSAO bilateral blur compute shader ping-pong
     glGenTextures(1, &ssaoScratchpadTextureID);
@@ -1057,6 +1187,62 @@ void Scene::CreateShader()
     reflectionProgram->UnuseShader();
 
     // -----------------------------------------------------------------
+    // Snow Update Pass — simulate all particles in parallel on the GPU
+    // (Paper Section III.C: update velocities and positions via Euler
+    //  integration rendered as a fullscreen quad into a float texture.)
+    // -----------------------------------------------------------------
+
+    if (enableSnow) {
+        FBO& readFbo  = snowPingPong ? snowFboB : snowFboA;
+        FBO& writeFbo = snowPingPong ? snowFboA : snowFboB;
+
+        glBindFramebuffer(GL_FRAMEBUFFER, writeFbo.fboID);
+        glViewport(0, 0, SNOW_TEX_SIZE, SNOW_TEX_SIZE);
+        glDisable(GL_DEPTH_TEST);
+
+        snowUpdateProgram->UseShader();
+        programId = snowUpdateProgram->programId;
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, readFbo.gFragData[0]);
+        glUniform1i(glGetUniformLocation(programId, "posTex"), 0);
+
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, readFbo.gFragData[1]);
+        glUniform1i(glGetUniformLocation(programId, "velTex"), 1);
+
+        float snowDt = (float)time_since_last_refresh;
+        if (snowDt > 0.05f) snowDt = 0.05f; // clamp to avoid instability
+        glUniform1f(glGetUniformLocation(programId, "dt"),   snowDt);
+        glUniform1f(glGetUniformLocation(programId, "time"), (float)glfwGetTime());
+        glUniform3fv(glGetUniformLocation(programId, "wind"), 1, &snowWind[0]);
+
+        glm::vec3 spawnMin(-grndSize, -grndSize, grndLow);
+        glm::vec3 spawnMax( grndSize,  grndSize, snowSpawnHeight);
+        glUniform3fv(glGetUniformLocation(programId, "spawnMin"), 1, &spawnMin[0]);
+        glUniform3fv(glGetUniformLocation(programId, "spawnMax"), 1, &spawnMax[0]);
+        glUniform1f(glGetUniformLocation(programId, "groundZ"), grndLow);
+
+        CHECKERROR;
+        fullScreenQuad->Draw(snowUpdateProgram, Identity);
+        CHECKERROR;
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        snowUpdateProgram->UnuseShader();
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glEnable(GL_DEPTH_TEST);
+
+        snowPingPong = !snowPingPong;
+
+        // Update the CPU-side deposition height field (Paper Section IV)
+        UpdateSnowDeposition();
+    }
+
+    // -----------------------------------------------------------------
     // G Buffer Pass
     // Render all scene objects into the G-Buffer textures
     // -----------------------------------------------------------------
@@ -1089,11 +1275,32 @@ void Scene::CreateShader()
     loc = glGetUniformLocation(gBufferProgram->programId, "viewPos");
     glUniform3fv(loc, 1, &eye[0]);
 
+    // Snow height field — used in gBuffer.frag to blend snow material
+    if (enableSnow) {
+        glActiveTexture((GLenum)((int)GL_TEXTURE0 + 15));
+        glBindTexture(GL_TEXTURE_2D, snowHeightTex);
+        loc = glGetUniformLocation(gBufferProgram->programId, "snowHeightTex");
+        glUniform1i(loc, 15);
+        // snowScale: maps raw accumulated height values to [0,1] blend range
+        float snowScale = 1.0f / 0.3f; // saturates at ~0.3 world units of accumulation
+        loc = glGetUniformLocation(gBufferProgram->programId, "snowScale");
+        glUniform1f(loc, snowScale);
+        loc = glGetUniformLocation(gBufferProgram->programId, "snowEnabled");
+        glUniform1i(loc, 1);
+    } else {
+        loc = glGetUniformLocation(gBufferProgram->programId, "snowEnabled");
+        glUniform1i(loc, 0);
+    }
+
     // Draw the entire scene hierarchy
     // Note: The 'Draw' method in your Object class sets the Model matrix
     CHECKERROR;
     objectRoot->Draw(gBufferProgram, Identity);
     CHECKERROR;
+
+    // Unbind snow height texture
+    glActiveTexture((GLenum)((int)GL_TEXTURE0 + 15));
+    glBindTexture(GL_TEXTURE_2D, 0);
 
     gBufferProgram->UnuseShader();
     gBufferFbo.UnbindFBO();
@@ -1383,5 +1590,51 @@ void Scene::CreateShader()
 
         gBufferFbo.UnbindGBufferTextures(2);
         localLightsProgram->UnuseShader();
+    }
+
+    // -----------------------------------------------------------------
+    // Snow Render Pass — draw falling particles as point sprites
+    // (Paper Section III.E: rendered as point sprites on top of the
+    //  fully-lit scene via alpha blending.)
+    // -----------------------------------------------------------------
+
+    if (enableSnow) {
+        // The *current* FBO is whichever side was written last this frame.
+        // snowPingPong was toggled after the update pass, so the freshly-
+        // written data is on the side snowPingPong now points away from.
+        FBO& currentFbo = snowPingPong ? snowFboB : snowFboA;
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, 750, 750);
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_PROGRAM_POINT_SIZE);
+
+        snowRenderProgram->UseShader();
+        programId = snowRenderProgram->programId;
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, currentFbo.gFragData[0]);
+        glUniform1i(glGetUniformLocation(programId, "posTex"), 0);
+        glUniform1i(glGetUniformLocation(programId, "texWidth"), SNOW_TEX_SIZE);
+        glUniform1f(glGetUniformLocation(programId, "particleSize"), snowParticleSize);
+        glUniformMatrix4fv(glGetUniformLocation(programId, "WorldView"), 1, GL_FALSE, Pntr(WorldView));
+        glUniformMatrix4fv(glGetUniformLocation(programId, "WorldProj"), 1, GL_FALSE, Pntr(WorldProj));
+
+        CHECKERROR;
+        glBindVertexArray(snowDummyVAO);
+        glDrawArrays(GL_POINTS, 0, SNOW_TEX_SIZE * SNOW_TEX_SIZE);
+        glBindVertexArray(0);
+        CHECKERROR;
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        snowRenderProgram->UnuseShader();
+
+        glDisable(GL_BLEND);
+        glDisable(GL_PROGRAM_POINT_SIZE);
+        glEnable(GL_DEPTH_TEST);
     }
 }

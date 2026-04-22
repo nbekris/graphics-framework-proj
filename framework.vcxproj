@@ -169,6 +169,10 @@
     <None Include="glsl shaders\reflectionBottom.vert" />
     <None Include="glsl shaders\shadow.frag" />
     <None Include="glsl shaders\shadow.vert" />
+    <None Include="glsl shaders\snowRender.frag" />
+    <None Include="glsl shaders\snowRender.vert" />
+    <None Include="glsl shaders\snowUpdate.frag" />
+    <None Include="glsl shaders\snowUpdate.vert" />
     <None Include="glsl shaders\SSAO.frag" />
     <None Include="glsl shaders\SSAO.vert" />
     <None Include="glsl shaders\ssaoBlur.comp" />

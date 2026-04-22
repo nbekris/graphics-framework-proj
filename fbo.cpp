@@ -149,6 +149,42 @@ void FBO::CreateGBuffer(const int w, const int h)
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+////////////////////////////////////////////////////////////////////////
+// Creates a snow ping-pong FBO with two RGBA32F color attachments:
+//   gFragData[0] = particle positions (xyz)
+//   gFragData[1] = particle velocities (xyz)
+// No depth buffer — the update pass is a fullscreen quad with no depth test.
+////////////////////////////////////////////////////////////////////////
+void FBO::CreateDualFBO(const int w, const int h)
+{
+    width  = w;
+    height = h;
+
+    glGenFramebuffers(1, &fboID);
+    glBindFramebuffer(GL_FRAMEBUFFER, fboID);
+
+    glGenTextures(2, gFragData);
+
+    for (int i = 0; i < 2; i++) {
+        glBindTexture(GL_TEXTURE_2D, gFragData[i]);
+        glTexImage2D(GL_TEXTURE_2D, 0, (int)GL_RGBA32F, w, h, 0, GL_RGBA, GL_FLOAT, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (int)GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (int)GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,     (int)GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,     (int)GL_CLAMP_TO_EDGE);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, GL_TEXTURE_2D, gFragData[i], 0);
+    }
+
+    const GLenum attachments[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+    glDrawBuffers(2, attachments);
+
+    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE)
+        printf("Snow Dual FBO Error, status: 0x%x\n", (int)status);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
 void FBO::BindGBufferTextures(int startUnit, int programId, 
     std::string fragDataName, std::string lightVecName, std::string eyeVecName)
 {

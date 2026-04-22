@@ -138,6 +138,31 @@ public:
     // Options menu stuff
     bool show_demo_window;
 
+    // ----------------------------------------------------------------
+    // Snow particle system (Paper: "Rendering Snowing Scene on GPU")
+    // ----------------------------------------------------------------
+    static constexpr int SNOW_TEX_SIZE  = 128;  // 128x128 = 16384 particles
+    static constexpr int SNOW_GRID_SIZE = 256;  // deposition height field resolution
+
+    ShaderProgram* snowUpdateProgram;   // particle physics update (fullscreen quad)
+    ShaderProgram* snowRenderProgram;   // particle render (GL_POINTS)
+    GLuint         snowDummyVAO;        // empty VAO required by Core profile for gl_VertexID draws
+    bool           snowPingPong;        // which FBO pair is "current"
+
+    // Height field for snow deposition (Paper Section IV).
+    // Heap-allocated — 256x256 floats (256 KB) would overflow the stack
+    // if Scene is declared as a global or local variable in framework.cpp.
+    float (*snowHeight)[SNOW_GRID_SIZE];
+    GLuint snowHeightTex;
+
+    // Tuning parameters
+    glm::vec3 snowWind;
+    float     snowParticleSize;
+    float     snowAccumRate;    // height added to the grid per frame
+    bool      enableSnow;
+
+    void UpdateSnowDeposition();
+
     void InitializeScene();
     void BuildTransforms();
     void DrawMenu();
