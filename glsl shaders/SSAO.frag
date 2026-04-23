@@ -51,7 +51,7 @@ void main()
     // Pseudo-random rotation hash (PDF eq: phi = (30*x' ^ y') + 10*x'*y')
     int xp = int(gl_FragCoord.x);
     int yp = int(gl_FragCoord.y);
-    float phi = float(((30 * xp) ^ yp) + 10 * xp * yp);
+    float phi = mod(float(((30 * xp) ^ yp) + 10 * xp * yp), 2.0 * PI);
 
     float S = 0.0;
 

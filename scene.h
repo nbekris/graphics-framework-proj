@@ -122,7 +122,7 @@ public:
     // Tone mapping
     float exposure = 2.0f;
 
-    bool enablePointLights = true;
+    bool enablePointLights = false;
     bool enableDirectLight = true;
     bool enableOrbitSpheres = true;
 
@@ -168,4 +168,5 @@ public:
     void DrawMenu();
     void DrawScene();
     void CreateShader();
+    void ResizeScreenFBOs(int w, int h);
 };

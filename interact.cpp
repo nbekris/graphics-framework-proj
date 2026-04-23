@@ -70,6 +70,20 @@ void Keyboard(GLFWwindow* window, int key, int scancode, int action, int mods)
         case GLFW_KEY_5: case GLFW_KEY_6: case GLFW_KEY_7: case GLFW_KEY_8: case GLFW_KEY_9:
             scene.mode = key-GLFW_KEY_0;
             break;
+        case GLFW_KEY_F11: {
+            static bool fullscreen = false;
+            static int savedX, savedY, savedW, savedH;
+            fullscreen = !fullscreen;
+            if (fullscreen) {
+                glfwGetWindowPos(window,  &savedX, &savedY);
+                glfwGetWindowSize(window, &savedW, &savedH);
+                GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+                const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+                glfwSetWindowMonitor(window, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
+            } else {
+                glfwSetWindowMonitor(window, nullptr, savedX, savedY, savedW, savedH, 0);
+            }
+            break; }
         case GLFW_KEY_ESCAPE: case GLFW_KEY_Q: // Escape and 'q' keys quit the application
             exit(0); } }
         

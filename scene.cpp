@@ -72,8 +72,8 @@ std::vector<float> lightRanges;
 GLuint Bindpoint = 0;
 GLuint scratchpadTextureID;
 GLuint preBlurTextureID; // Debug: copy of shadow map before blur
-GLuint SHADOW_WIDTH = 2048;
-GLuint SHADOW_HEIGHT = 2048;
+GLuint SHADOW_WIDTH = 750;
+GLuint SHADOW_HEIGHT = 750;
 
 
 const float grndSize = 100.0;    // Island radius;  Minimum about 20;  Maximum 1000 or so
@@ -927,6 +927,32 @@ void Scene::BuildTransforms()
 }
 
 ////////////////////////////////////////////////////////////////////////
+// Recreates screen-sized FBOs (G-buffer, SSAO, scratchpad) to match
+// a new framebuffer size after a window resize or fullscreen toggle.
+void Scene::ResizeScreenFBOs(int w, int h)
+{
+    glDeleteTextures(4, gBufferFbo.gFragData);
+    glDeleteTextures(1, &gBufferFbo.gLightVec);
+    glDeleteTextures(1, &gBufferFbo.gEyeVec);
+    glDeleteFramebuffers(1, &gBufferFbo.fboID);
+    gBufferFbo.CreateGBuffer(w, h);
+
+    glDeleteTextures(1, &ssaoFbo.textureID);
+    glDeleteFramebuffers(1, &ssaoFbo.fboID);
+    ssaoFbo.CreateFBO(w, h);
+
+    glDeleteTextures(1, &ssaoScratchpadTextureID);
+    glGenTextures(1, &ssaoScratchpadTextureID);
+    glBindTexture(GL_TEXTURE_2D, ssaoScratchpadTextureID);
+    glTexImage2D(GL_TEXTURE_2D, 0, (int)GL_RGBA32F, w, h, 0, GL_RGBA, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (int)GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (int)GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (int)GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (int)GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+////////////////////////////////////////////////////////////////////////
 // Procedure DrawScene is called whenever the scene needs to be
 // drawn. (Which is often: 30 to 60 times per second are the common
 // goals.)
@@ -935,6 +961,10 @@ void Scene::DrawScene()
     // Set the viewport
     glfwGetFramebufferSize(window, &width, &height);
     glViewport(0, 0, width, height);
+
+    // Recreate screen-sized FBOs if the window was resized or went fullscreen
+    if (width != gBufferFbo.width || height != gBufferFbo.height)
+        ResizeScreenFBOs(width, height);
 
 	// recalculate eye position
     // Calculate time step
@@ -1251,7 +1281,7 @@ void Scene::CreateShader()
 
     // Clear Color and Depth of the G-Buffer
     // We clear to black (0,0,0) so empty space has no position/normal data
-    glViewport(0, 0, 750, 750); // We might need to clear again
+    glViewport(0, 0, width, height);
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -1313,7 +1343,7 @@ void Scene::CreateShader()
     glDisable(GL_DEPTH_TEST);
 
     ssaoFbo.BindFBO();
-    glViewport(0, 0, 750, 750);
+    glViewport(0, 0, width, height);
     glClearColor(1.0f, 1.0f, 1.0f, 1.0f); // Default: no occlusion
     glClear(GL_COLOR_BUFFER_BIT);
 
@@ -1335,9 +1365,9 @@ void Scene::CreateShader()
     glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldView));
 
     loc = glGetUniformLocation(programId, "width");
-    glUniform1f(loc, 750.0f);
+    glUniform1f(loc, (float)width);
     loc = glGetUniformLocation(programId, "height");
-    glUniform1f(loc, 750.0f);
+    glUniform1f(loc, (float)height);
 
     loc = glGetUniformLocation(programId, "radius");
     glUniform1f(loc, ssaoRadius);
@@ -1389,7 +1419,7 @@ void Scene::CreateShader()
     loc = glGetUniformLocation(programId, "blurDirection");
     glUniform2i(loc, 1, 0);
 
-    glDispatchCompute((750 + 127) / 128, 750, 1);
+    glDispatchCompute((width + 127) / 128, height, 1);
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 
     // --- Vertical blur: scratchpad -> ssaoFbo ---
@@ -1398,7 +1428,7 @@ void Scene::CreateShader()
     loc = glGetUniformLocation(programId, "blurDirection");
     glUniform2i(loc, 0, 1);
 
-    glDispatchCompute((750 + 127) / 128, 750, 1);
+    glDispatchCompute((width + 127) / 128, height, 1);
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 
     glActiveTexture(GL_TEXTURE0);
@@ -1420,7 +1450,7 @@ void Scene::CreateShader()
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
     // Clear the screen (optional, but good practice)
-    glViewport(0, 0, 750, 750);
+    glViewport(0, 0, width, height);
     glClearColor(0.0, 0.0, 0.0, 0.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -1605,7 +1635,7 @@ void Scene::CreateShader()
         FBO& currentFbo = snowPingPong ? snowFboB : snowFboA;
 
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glViewport(0, 0, 750, 750);
+        glViewport(0, 0, width, height);
 
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
