@@ -1,0 +1,56 @@
+#version 430 core
+// Snow deposition rules — Paper Section IV, Rules 1-3.
+// Runs after snowUpdate.frag has atomically written landing events into
+// heightImg.  Each thread owns one grid cell and decides whether to
+// roll snow to lower neighbours.
+//
+// Race condition note: two adjacent cells can both decide to roll into
+// each other in the same dispatch.  imageAtomicAdd makes the individual
+// increments/decrements safe, but the combined effect is an approximation
+// of the serial rules.  This is acceptable in practice and is standard
+// for GPU cellular-automata implementations.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// r32i required for imageAtomicAdd
+layout(r32i, binding = 0) coherent uniform iimage2D heightImg;
+
+// Both expressed in the same integer scale as the image (world units x 1000).
+uniform int addAmountInt;  // one landing-event's worth of height
+uniform int rollThreshold; // min height difference before snow rolls (= addAmountInt * 1.5)
+
+void main()
+{
+    ivec2 coord   = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 imgSize = imageSize(heightImg);
+
+    // Leave a 1-cell border so neighbour reads are always in-bounds
+    if (coord.x < 1 || coord.y < 1 ||
+        coord.x >= imgSize.x - 1 || coord.y >= imgSize.y - 1)
+        return;
+
+    int h = imageLoad(heightImg, coord).r;
+
+    const ivec2 off[4] = ivec2[4](
+        ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1)
+    );
+
+    // --- Paper Rule 1 / pre-check ---
+    // Gather which neighbours are lower by more than the roll threshold.
+    int  lowerCount = 0;
+    bool isLower[4];
+    for (int i = 0; i < 4; i++) {
+        isLower[i] = (imageLoad(heightImg, coord + off[i]).r < h - rollThreshold);
+        if (isLower[i]) lowerCount++;
+    }
+
+    // Rule 1: no lower neighbours → stable, nothing moves
+    if (lowerCount == 0) return;
+
+    // Rules 2 & 3: roll one landing-event's worth equally to all lower neighbours
+    imageAtomicAdd(heightImg, coord, -addAmountInt);
+    int share = addAmountInt / lowerCount;
+    for (int i = 0; i < 4; i++)
+        if (isLower[i])
+            imageAtomicAdd(heightImg, coord + off[i], share);
+}

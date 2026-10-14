@@ -146,22 +146,22 @@ public:
 
     ShaderProgram* snowUpdateProgram;   // particle physics update (fullscreen quad)
     ShaderProgram* snowRenderProgram;   // particle render (GL_POINTS)
+    ShaderProgram* snowDepositProgram;  // compute shader: deposition rules (Paper Section IV)
     GLuint         snowDummyVAO;        // empty VAO required by Core profile for gl_VertexID draws
     bool           snowPingPong;        // which FBO pair is "current"
 
     // Height field for snow deposition (Paper Section IV).
-    // Heap-allocated — 256x256 floats (256 KB) would overflow the stack
-    // if Scene is declared as a global or local variable in framework.cpp.
-    float (*snowHeight)[SNOW_GRID_SIZE];
+    // GL_R32I integer texture; heights stored as integer world-units × 1000.
+    // Updated entirely on GPU via imageAtomicAdd — no CPU readback.
     GLuint snowHeightTex;
 
     // Tuning parameters
     glm::vec3 snowWind;
+    float     snowGravity;      // gravitational acceleration (world units/s^2, positive = downward)
     float     snowParticleSize;
-    float     snowAccumRate;    // height added to the grid per frame
+    float     snowAccumRate;    // height added per landing event (world units)
+    float     snowDispScale;    // max pile height in world units (vertex displacement)
     bool      enableSnow;
-
-    void UpdateSnowDeposition();
 
     void InitializeScene();
     void BuildTransforms();

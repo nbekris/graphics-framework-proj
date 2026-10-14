@@ -41,9 +41,10 @@ uniform float hasNormal;
 uniform bool reflective;
 
 // Snow deposition (Paper Section IV)
-uniform sampler2D snowHeightTex; // R32F height field covering scene XY [-100,100]
-uniform float     snowScale;     // maps raw height to [0,1] blend weight
-uniform int       snowEnabled;
+// GL_R32I integer texture — must use isampler2D; heights stored as int × 1000
+uniform isampler2D snowHeightTex; // R32I height field covering scene XY [-100,100]
+uniform float      snowScale;     // maps raw height to [0,1] blend weight
+uniform int        snowEnabled;
 
 vec3 SetNormalMap(vec2 uv, vec3 T, vec3 B, vec3 N)
 {
@@ -144,7 +145,7 @@ void main()
 	if (snowEnabled != 0 && (objectId == groundId || objectId == floorId)) {
 		// Map world XY [-100, 100] to UV [0, 1]
 		vec2  gridUV  = clamp((worldPos.xy / 100.0) * 0.5 + 0.5, 0.0, 1.0);
-		float snowAmt = texture(snowHeightTex, gridUV).r * snowScale;
+		float snowAmt = float(texture(snowHeightTex, gridUV).r) / 1000.0 * snowScale;
 
 		// Surfaces facing more toward +Z accumulate more snow
 		float upFactor = clamp(N.z, 0.0, 1.0);

@@ -334,61 +334,6 @@ void SaveIrradianceMap(const glm::vec3 shCoeffs[9], const char* filename)
 }
 
 ////////////////////////////////////////////////////////////////////////
-// UpdateSnowDeposition — CPU implementation of the paper's three
-// deposition rules (Paper Section IV).  Called once per frame.
-// Adds a small uniform accumulation then relaxes the height field so
-// snow rolls from peaks into valleys, matching the paper's rules:
-//   Rule 1: cell <= all neighbors  →  stable, deposit in place.
-//   Rule 2: cell > all neighbors, neighbors equal  →  roll to random neighbor.
-//   Rule 3: cell > some neighbors  →  roll equally to all lower neighbors.
-////////////////////////////////////////////////////////////////////////
-void Scene::UpdateSnowDeposition()
-{
-    const float threshold = 0.05f; // height difference that triggers rolling
-
-    // Add a uniform thin layer each frame (simulates snowfall from above)
-    for (int x = 1; x < SNOW_GRID_SIZE - 1; x++)
-        for (int y = 1; y < SNOW_GRID_SIZE - 1; y++)
-            snowHeight[x][y] += snowAccumRate;
-
-    // Relaxation pass: apply the three deposition rules
-    for (int x = 1; x < SNOW_GRID_SIZE - 1; x++) {
-        for (int y = 1; y < SNOW_GRID_SIZE - 1; y++) {
-            float h = snowHeight[x][y];
-
-            int   dx[4] = { -1,  1,  0,  0 };
-            int   dy[4] = {  0,  0, -1,  1 };
-            float nh[4] = {
-                snowHeight[x-1][y], snowHeight[x+1][y],
-                snowHeight[x][y-1], snowHeight[x][y+1]
-            };
-
-            // Collect lower neighbors (Rule 2 / Rule 3)
-            int lower[4], lowerCount = 0;
-            for (int i = 0; i < 4; i++)
-                if (nh[i] < h - threshold)
-                    lower[lowerCount++] = i;
-
-            if (lowerCount == 0) continue; // Rule 1 — stable
-
-            // Transfer a small amount equally to all lower neighbors
-            float rollAmt = snowAccumRate * 2.0f;
-            snowHeight[x][y] -= rollAmt;
-            float share = rollAmt / (float)lowerCount;
-            for (int i = 0; i < lowerCount; i++)
-                snowHeight[x + dx[lower[i]]][y + dy[lower[i]]] += share;
-        }
-    }
-
-    // Upload the updated height field to the GPU texture
-    glBindTexture(GL_TEXTURE_2D, snowHeightTex);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
-                    SNOW_GRID_SIZE, SNOW_GRID_SIZE,
-                    GL_RED, GL_FLOAT, snowHeight);
-    glBindTexture(GL_TEXTURE_2D, 0);
-}
-
-////////////////////////////////////////////////////////////////////////
 // InitializeScene is called once during setup to create all the
 // textures, shape VAOs, and shader programs as well as setting a
 // number of other parameters.
@@ -505,28 +450,36 @@ void Scene::InitializeScene()
         glBindTexture(GL_TEXTURE_2D, 0);
     }
 
-    // Snow height field texture (R32F, covers [-grndSize, grndSize] in XY)
-    // Allocate on the heap and zero-initialise (the () suffix does value-init)
-    snowHeight = new float[SNOW_GRID_SIZE][SNOW_GRID_SIZE]();
-    glGenTextures(1, &snowHeightTex);
-    glBindTexture(GL_TEXTURE_2D, snowHeightTex);
-    glTexImage2D(GL_TEXTURE_2D, 0, (int)GL_R32F,
-                 SNOW_GRID_SIZE, SNOW_GRID_SIZE, 0, GL_RED, GL_FLOAT, snowHeight);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (int)GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (int)GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,     (int)GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,     (int)GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    // Snow height field texture (R32I, covers [-grndSize, grndSize] in XY).
+    // Entirely GPU-driven: imageAtomicAdd writes landings, compute shader relaxes.
+    // Heights stored as integer world-units × 1000 (e.g. 200 = 0.2 world units).
+    // Zero-initialised via a temporary zero buffer.
+    {
+        std::vector<int> zeroData(SNOW_GRID_SIZE * SNOW_GRID_SIZE, 0);
+        glGenTextures(1, &snowHeightTex);
+        glBindTexture(GL_TEXTURE_2D, snowHeightTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, (int)GL_R32I,
+                     SNOW_GRID_SIZE, SNOW_GRID_SIZE, 0,
+                     GL_RED_INTEGER, GL_INT, zeroData.data());
+        // Integer textures require NEAREST filtering (LINEAR is not valid for int formats)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (int)GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (int)GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,     (int)GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,     (int)GL_CLAMP_TO_EDGE);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
 
     // Dummy VAO — OpenGL Core profile requires a bound VAO for every draw call,
     // even when vertex data comes entirely from gl_VertexID + texture fetches.
     glGenVertexArrays(1, &snowDummyVAO);
 
     // Tuning defaults
-    snowWind        = glm::vec3(0.3f, 0.1f, 0.0f);
+    snowWind         = glm::vec3(0.3f, 0.1f, 0.0f);
+    snowGravity      = 9.8f;
     snowParticleSize = 4.0f;
-    snowAccumRate   = 0.00005f;
-    enableSnow      = true;
+    snowAccumRate    = 0.2f;   // addAmountInt = int(snowAccumRate * 1000) = 200 per landing
+    snowDispScale    = 1.5f;   // piles up to 1.5 world units tall
+    enableSnow       = true;
 
     // Compile snow shader programs
     snowUpdateProgram = new ShaderProgram();
@@ -540,6 +493,11 @@ void Scene::InitializeScene()
     snowRenderProgram->AddShader("glsl shaders/snowRender.vert", GL_VERTEX_SHADER);
     snowRenderProgram->AddShader("glsl shaders/snowRender.frag", GL_FRAGMENT_SHADER);
     snowRenderProgram->LinkProgram();
+
+    // Compute shader: GPU deposition rules (Paper Section IV, Rules 1-3)
+    snowDepositProgram = new ShaderProgram();
+    snowDepositProgram->AddShader("glsl shaders/snowDeposit.comp", GL_COMPUTE_SHADER);
+    snowDepositProgram->LinkProgram();
 
     // Scratchpad texture for SSAO bilateral blur compute shader ping-pong
     glGenTextures(1, &ssaoScratchpadTextureID);
@@ -702,7 +660,7 @@ void Scene::InitializeScene()
     Texture* rightFrameTexture = new Texture("textures/my-house-01.png");
     Texture* skyTexture = new Texture("skys/Ocean.png");
 
-    HDR* skyHDR = new HDR("skys/Road_to_MonumentValley_Ref.hdr", true);
+    HDR* skyHDR = new HDR("skys/overcast_soil_puresky_4k.hdr", true);
     ProjectSH(skyHDR->image, skyHDR->width, skyHDR->height, shCoeffs);
     SaveIrradianceMap(shCoeffs, "irradiance_map.hdr");
     skyHDRWidth  = skyHDR->width;
@@ -856,7 +814,7 @@ void Scene::DrawMenu()
         ImGui::EndMainMenuBar(); }
 
     ImGui::SetNextWindowPos(ImVec2(10, 30), ImGuiCond_Once);
-    ImGui::SetNextWindowSize(ImVec2(300, 320), ImGuiCond_Once);
+    ImGui::SetNextWindowSize(ImVec2(300, 500), ImGuiCond_Once);
     ImGui::SetNextWindowCollapsed(true, ImGuiCond_Once);
     ImGui::Begin("Settings");
     ImGui::SliderFloat("Exposure", &exposure, 0.1f, 10000.0f, "%.1f", ImGuiSliderFlags_Logarithmic);
@@ -875,6 +833,14 @@ void Scene::DrawMenu()
     ImGui::SliderFloat("AO Contrast", &ssaoContrast, 0.1f, 5.0f, "%.2f");
     ImGui::SliderInt("AO Samples", &ssaoNumSamples, 4, 64);
     ImGui::SliderInt("AO Blur Radius", &ssaoBlurRadius, 0, 20);
+    ImGui::Separator();
+    ImGui::Text("Snow");
+    ImGui::Checkbox("Enable Snow", &enableSnow);
+    ImGui::SliderFloat("Gravity",       &snowGravity,      0.0f,  30.0f, "%.1f");
+    ImGui::SliderFloat3("Wind",          &snowWind[0],     -5.0f,   5.0f, "%.2f");
+    ImGui::SliderFloat("Particle Size", &snowParticleSize,  1.0f,  16.0f, "%.1f");
+    ImGui::SliderFloat("Accum Rate",    &snowAccumRate,     0.01f,  1.0f, "%.3f");
+    ImGui::SliderFloat("Pile Height",   &snowDispScale,     0.1f,  10.0f, "%.2f");
     ImGui::End();
 
     ImGui::Render();
@@ -1243,8 +1209,9 @@ void Scene::CreateShader()
 
         float snowDt = (float)time_since_last_refresh;
         if (snowDt > 0.05f) snowDt = 0.05f; // clamp to avoid instability
-        glUniform1f(glGetUniformLocation(programId, "dt"),   snowDt);
-        glUniform1f(glGetUniformLocation(programId, "time"), (float)glfwGetTime());
+        glUniform1f(glGetUniformLocation(programId, "dt"),      snowDt);
+        glUniform1f(glGetUniformLocation(programId, "time"),    (float)glfwGetTime());
+        glUniform1f(glGetUniformLocation(programId, "gravity"), snowGravity);
         glUniform3fv(glGetUniformLocation(programId, "wind"), 1, &snowWind[0]);
 
         glm::vec3 spawnMin(-grndSize, -grndSize, grndLow);
@@ -1252,6 +1219,16 @@ void Scene::CreateShader()
         glUniform3fv(glGetUniformLocation(programId, "spawnMin"), 1, &spawnMin[0]);
         glUniform3fv(glGetUniformLocation(programId, "spawnMax"), 1, &spawnMax[0]);
         glUniform1f(glGetUniformLocation(programId, "groundZ"), grndLow);
+
+        // Bind height field as a read/write image at binding 2 so landing particles
+        // can atomically increment it (Option 3 / imageAtomicAdd).
+        // addAmountInt = snowAccumRate * 1000 (integer world-units × 1000 scale).
+        int addAmountInt   = (int)(snowAccumRate * 1000.0f);
+        int rollThreshold  = addAmountInt + addAmountInt / 2; // 1.5× per paper
+        glBindImageTexture(2, snowHeightTex, 0, GL_FALSE, 0, GL_READ_WRITE, GL_R32I);
+        glUniform1i(glGetUniformLocation(programId, "addAmountInt"), addAmountInt);
+        glUniform1i(glGetUniformLocation(programId, "gridSize"),     SNOW_GRID_SIZE);
+        glUniform1f(glGetUniformLocation(programId, "worldSize"),    grndSize);
 
         CHECKERROR;
         fullScreenQuad->Draw(snowUpdateProgram, Identity);
@@ -1261,6 +1238,8 @@ void Scene::CreateShader()
         glBindTexture(GL_TEXTURE_2D, 0);
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, 0);
+        // Unbind the image slot
+        glBindImageTexture(2, 0, 0, GL_FALSE, 0, GL_READ_WRITE, GL_R32I);
 
         snowUpdateProgram->UnuseShader();
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -1268,8 +1247,26 @@ void Scene::CreateShader()
 
         snowPingPong = !snowPingPong;
 
-        // Update the CPU-side deposition height field (Paper Section IV)
-        UpdateSnowDeposition();
+        // Memory barrier: ensure imageAtomicAdd writes from the fragment shader are
+        // visible to the compute shader that reads the same image next.
+        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+
+        // -----------------------------------------------------------------
+        // Snow Deposition Compute Pass — Paper Section IV, Rules 1-3
+        // Runs the stability/relaxation rules across the whole height field.
+        // Dispatch 16×16 workgroups of 16×16 threads = 256×256 total threads.
+        // -----------------------------------------------------------------
+        snowDepositProgram->UseShader();
+        glBindImageTexture(0, snowHeightTex, 0, GL_FALSE, 0, GL_READ_WRITE, GL_R32I);
+        glUniform1i(glGetUniformLocation(snowDepositProgram->programId, "addAmountInt"),  addAmountInt);
+        glUniform1i(glGetUniformLocation(snowDepositProgram->programId, "rollThreshold"), rollThreshold);
+        glDispatchCompute(SNOW_GRID_SIZE / 16, SNOW_GRID_SIZE / 16, 1);
+        glBindImageTexture(0, 0, 0, GL_FALSE, 0, GL_READ_WRITE, GL_R32I);
+        snowDepositProgram->UnuseShader();
+
+        // Memory barrier: ensure compute writes are visible to the texture sampler
+        // in gBuffer.vert/frag (texture fetch barrier) and to future image accesses.
+        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
     }
 
     // -----------------------------------------------------------------
@@ -1305,21 +1302,28 @@ void Scene::CreateShader()
     loc = glGetUniformLocation(gBufferProgram->programId, "viewPos");
     glUniform3fv(loc, 1, &eye[0]);
 
-    // Snow height field — used in gBuffer.frag to blend snow material
+    // Snow height field — used in both gBuffer.vert (displacement) and gBuffer.frag (material)
     if (enableSnow) {
         glActiveTexture((GLenum)((int)GL_TEXTURE0 + 15));
         glBindTexture(GL_TEXTURE_2D, snowHeightTex);
         loc = glGetUniformLocation(gBufferProgram->programId, "snowHeightTex");
         glUniform1i(loc, 15);
-        // snowScale: maps raw accumulated height values to [0,1] blend range
-        float snowScale = 1.0f / 0.3f; // saturates at ~0.3 world units of accumulation
+        // snowScale: maps height (already divided by 1000 in shader) to [0,1] blend weight.
+        // Set so one landing event (snowAccumRate world units) fully saturates a cell to white.
+        // Shader clamps snowAmt to [0,1] so piled cells stay white without over-brightening.
+        float snowScale = 1.0f / snowAccumRate;
         loc = glGetUniformLocation(gBufferProgram->programId, "snowScale");
         glUniform1f(loc, snowScale);
+        // snowDispScale: max pile height in world units for vertex displacement
+        loc = glGetUniformLocation(gBufferProgram->programId, "snowDispScale");
+        glUniform1f(loc, snowDispScale);
         loc = glGetUniformLocation(gBufferProgram->programId, "snowEnabled");
         glUniform1i(loc, 1);
     } else {
         loc = glGetUniformLocation(gBufferProgram->programId, "snowEnabled");
         glUniform1i(loc, 0);
+        loc = glGetUniformLocation(gBufferProgram->programId, "snowDispScale");
+        glUniform1f(loc, 0.0f);
     }
 
     // Draw the entire scene hierarchy
