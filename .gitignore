@@ -72,3 +72,6 @@ libs/
 node_modules/
 package-lock.json
 package.json
+# Runtime-generated irradiance maps
+/assets/generated/*
+!/assets/generated/.gitkeep

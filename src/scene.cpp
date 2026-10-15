@@ -483,20 +483,20 @@ void Scene::InitializeScene()
 
     // Compile snow shader programs
     snowUpdateProgram = new ShaderProgram();
-    snowUpdateProgram->AddShader("glsl shaders/snowUpdate.vert", GL_VERTEX_SHADER);
-    snowUpdateProgram->AddShader("glsl shaders/snowUpdate.frag", GL_FRAGMENT_SHADER);
+    snowUpdateProgram->AddShader("shaders/snowUpdate.vert", GL_VERTEX_SHADER);
+    snowUpdateProgram->AddShader("shaders/snowUpdate.frag", GL_FRAGMENT_SHADER);
     glBindAttribLocation(snowUpdateProgram->programId, 0, "vertex");
     glBindAttribLocation(snowUpdateProgram->programId, 2, "vertexTexture");
     snowUpdateProgram->LinkProgram();
 
     snowRenderProgram = new ShaderProgram();
-    snowRenderProgram->AddShader("glsl shaders/snowRender.vert", GL_VERTEX_SHADER);
-    snowRenderProgram->AddShader("glsl shaders/snowRender.frag", GL_FRAGMENT_SHADER);
+    snowRenderProgram->AddShader("shaders/snowRender.vert", GL_VERTEX_SHADER);
+    snowRenderProgram->AddShader("shaders/snowRender.frag", GL_FRAGMENT_SHADER);
     snowRenderProgram->LinkProgram();
 
     // Compute shader: GPU deposition rules (Paper Section IV, Rules 1-3)
     snowDepositProgram = new ShaderProgram();
-    snowDepositProgram->AddShader("glsl shaders/snowDeposit.comp", GL_COMPUTE_SHADER);
+    snowDepositProgram->AddShader("shaders/snowDeposit.comp", GL_COMPUTE_SHADER);
     snowDepositProgram->LinkProgram();
 
     // Scratchpad texture for SSAO bilateral blur compute shader ping-pong
@@ -511,8 +511,8 @@ void Scene::InitializeScene()
 
 	// Create Deferred Rendering shader program
     gBufferProgram = new ShaderProgram();
-	gBufferProgram->AddShader("glsl shaders/gBuffer.vert", GL_VERTEX_SHADER);
-	gBufferProgram->AddShader("glsl shaders/gBuffer.frag", GL_FRAGMENT_SHADER);
+	gBufferProgram->AddShader("shaders/gBuffer.vert", GL_VERTEX_SHADER);
+	gBufferProgram->AddShader("shaders/gBuffer.frag", GL_FRAGMENT_SHADER);
 	glBindAttribLocation(gBufferProgram->programId, 0, "vertex");
 	glBindAttribLocation(gBufferProgram->programId, 1, "vertexNormal");
 	glBindAttribLocation(gBufferProgram->programId, 2, "vertexTexture");
@@ -520,8 +520,8 @@ void Scene::InitializeScene()
 	gBufferProgram->LinkProgram();
 
 	deferredLightProgram = new ShaderProgram();
-	deferredLightProgram->AddShader("glsl shaders/deferredLight.vert", GL_VERTEX_SHADER);
-	deferredLightProgram->AddShader("glsl shaders/deferredLight.frag", GL_FRAGMENT_SHADER);
+	deferredLightProgram->AddShader("shaders/deferredLight.vert", GL_VERTEX_SHADER);
+	deferredLightProgram->AddShader("shaders/deferredLight.frag", GL_FRAGMENT_SHADER);
 	glBindAttribLocation(deferredLightProgram->programId, 0, "vertex");
 	glBindAttribLocation(deferredLightProgram->programId, 2, "vertexTexture");
 	deferredLightProgram->LinkProgram();
@@ -535,15 +535,15 @@ void Scene::InitializeScene()
     }
 
     localLightsProgram = new ShaderProgram();
-    localLightsProgram->AddShader("glsl shaders/localLights.vert", GL_VERTEX_SHADER);
-    localLightsProgram->AddShader("glsl shaders/localLights.frag", GL_FRAGMENT_SHADER);
+    localLightsProgram->AddShader("shaders/localLights.vert", GL_VERTEX_SHADER);
+    localLightsProgram->AddShader("shaders/localLights.frag", GL_FRAGMENT_SHADER);
     glBindAttribLocation(localLightsProgram->programId, 0, "vertex");
     localLightsProgram->LinkProgram();
 
     // SSAO shader program (reuses deferredLight.vert)
     ssaoProgram = new ShaderProgram();
-    ssaoProgram->AddShader("glsl shaders/deferredLight.vert", GL_VERTEX_SHADER);
-    ssaoProgram->AddShader("glsl shaders/SSAO.frag", GL_FRAGMENT_SHADER);
+    ssaoProgram->AddShader("shaders/deferredLight.vert", GL_VERTEX_SHADER);
+    ssaoProgram->AddShader("shaders/SSAO.frag", GL_FRAGMENT_SHADER);
     glBindAttribLocation(ssaoProgram->programId, 0, "vertex");
     glBindAttribLocation(ssaoProgram->programId, 2, "vertexTexture");
     ssaoProgram->LinkProgram();
@@ -551,16 +551,16 @@ void Scene::InitializeScene()
     // SSAO bilateral blur shader program (reuses deferredLight.vert)
     // SSAO bilateral blur compute shader
     ssaoBlurProgram = new ShaderProgram();
-    ssaoBlurProgram->AddShader("glsl shaders/ssaoBlur.comp", GL_COMPUTE_SHADER);
+    ssaoBlurProgram->AddShader("shaders/ssaoBlur.comp", GL_COMPUTE_SHADER);
     ssaoBlurProgram->LinkProgram();
 
 	// Reflection Shader Program (dual-paraboloid, forward lighting)
 	// reflection.vert does paraboloid projection + calls LightingVertex() from lighting.vert
 	// reflection.frag is self-contained with lighting matching deferredLight.frag
 	reflectionProgram = new ShaderProgram();
-	reflectionProgram->AddShader("glsl shaders/reflection.vert", GL_VERTEX_SHADER);
-	reflectionProgram->AddShader("glsl shaders/lighting.vert", GL_VERTEX_SHADER);
-	reflectionProgram->AddShader("glsl shaders/reflection.frag", GL_FRAGMENT_SHADER);
+	reflectionProgram->AddShader("shaders/reflection.vert", GL_VERTEX_SHADER);
+	reflectionProgram->AddShader("shaders/lighting.vert", GL_VERTEX_SHADER);
+	reflectionProgram->AddShader("shaders/reflection.frag", GL_FRAGMENT_SHADER);
 	glBindAttribLocation(reflectionProgram->programId, 0, "vertex");
 	glBindAttribLocation(reflectionProgram->programId, 1, "vertexNormal");
 	glBindAttribLocation(reflectionProgram->programId, 2, "vertexTexture");
@@ -569,8 +569,8 @@ void Scene::InitializeScene()
 
 	// Shadow Map Shader Program Initialization
     shadowProgram = new ShaderProgram();
-    shadowProgram->AddShader("glsl shaders/shadow.frag", GL_FRAGMENT_SHADER);
-    shadowProgram->AddShader("glsl shaders/shadow.vert", GL_VERTEX_SHADER);
+    shadowProgram->AddShader("shaders/shadow.frag", GL_FRAGMENT_SHADER);
+    shadowProgram->AddShader("shaders/shadow.vert", GL_VERTEX_SHADER);
     glBindAttribLocation(shadowProgram->programId, 0, "vertex");
     glBindAttribLocation(shadowProgram->programId, 1, "vertexNormal");
     glBindAttribLocation(shadowProgram->programId, 2, "vertexTexture");
@@ -579,7 +579,7 @@ void Scene::InitializeScene()
 
     // Compute Blur Shader Program
     computeBlurShader = new ShaderProgram();
-    computeBlurShader->AddShader("glsl shaders/blur.comp", GL_COMPUTE_SHADER);
+    computeBlurShader->AddShader("shaders/blur.comp", GL_COMPUTE_SHADER);
     computeBlurShader->LinkProgram();
 
     // Scratchpad texture for ping-pong blur (same size/format as shadow FBO)
@@ -625,7 +625,7 @@ void Scene::InitializeScene()
     Shape* BoxPolygons = new Box();
     Shape* SpherePolygons = new Sphere(32);
     Shape* LightSpherePolygons = new Sphere(32);
-    Shape* RoomPolygons = new Ply("room.ply");
+    Shape* RoomPolygons = new Ply("assets/models/room.ply");
     Shape* FloorPolygons = new Plane(10.0, 10);
     Shape* QuadPolygons = new Quad();
     Shape* SeaPolygons = new Plane(2000.0, 50);
@@ -652,17 +652,17 @@ void Scene::InitializeScene()
     // associate them with the various objects being created in the
     // next dozen lines of code.
 
-    Texture* roomTexture = new Texture("textures/Standard_red_pxr128.png");
-    Texture* floorTexture = new Texture("textures/6670-diffuse.jpg");
-    Texture* teapotTexture = new Texture("textures/cracks.png");
-    Texture* podiumTexture = new Texture("textures/Brazilian_rosewood_pxr128.png");
-    Texture* groundTexture = new Texture("textures/grass.jpg");
-    Texture* rightFrameTexture = new Texture("textures/my-house-01.png");
-    Texture* skyTexture = new Texture("skys/Ocean.png");
+    Texture* roomTexture = new Texture("assets/textures/Standard_red_pxr128.png");
+    Texture* floorTexture = new Texture("assets/textures/6670-diffuse.jpg");
+    Texture* teapotTexture = new Texture("assets/textures/cracks.png");
+    Texture* podiumTexture = new Texture("assets/textures/Brazilian_rosewood_pxr128.png");
+    Texture* groundTexture = new Texture("assets/textures/grass.jpg");
+    Texture* rightFrameTexture = new Texture("assets/textures/my-house-01.png");
+    Texture* skyTexture = new Texture("assets/skies/Ocean.png");
 
-    HDR* skyHDR = new HDR("skys/overcast_soil_puresky_4k.hdr", true);
+    HDR* skyHDR = new HDR("assets/skies/overcast_soil_puresky_4k.hdr", true);
     ProjectSH(skyHDR->image, skyHDR->width, skyHDR->height, shCoeffs);
-    SaveIrradianceMap(shCoeffs, "irradiance_map.hdr");
+    SaveIrradianceMap(shCoeffs, "assets/generated/irradiance_map.hdr");
     skyHDRWidth  = skyHDR->width;
     skyHDRHeight = skyHDR->height;
     skyHDR->FreePixels();
@@ -693,10 +693,10 @@ void Scene::InitializeScene()
         glBufferData(GL_UNIFORM_BUFFER, sizeof(hammersleyBlock), &hammersleyBlock, GL_STATIC_DRAW);
     }
 
-    Texture* roomNormal = new Texture("textures/Standard_red_pxr128_normal.png");
-    Texture* seaNormal = new Texture("textures/ripples_normalmap.png");
-    Texture* podiumNormal = new Texture("textures/Brazilian_rosewood_pxr128_normal.png");
-    Texture* floorNormal = new Texture("textures/6670-normal.jpg");
+    Texture* roomNormal = new Texture("assets/textures/Standard_red_pxr128_normal.png");
+    Texture* seaNormal = new Texture("assets/textures/ripples_normalmap.png");
+    Texture* podiumNormal = new Texture("assets/textures/Brazilian_rosewood_pxr128_normal.png");
+    Texture* floorNormal = new Texture("assets/textures/6670-normal.jpg");
     // @@ To change an object's surface parameters (Kd, Ks, or alpha),
     // modify the following lines.
     

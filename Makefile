@@ -4,43 +4,43 @@
 
 ifeq ($(v), tr)
     VFLAG := -DTR_SOLUTION
-    ODIR := tobjs
+    ODIR := build/linux/tobjs
     shaders = lighting.vert lighting.frag
     udflags = -USOLUTION -UPHONG_SOLUTION -DTR_SOLUTION -UEM -UEM_SOLUTION
     iblExtras = 
 else ifeq ($(v), phong)
     VFLAG := -DPHONG_SOLUTION -DTR_SOLUTION
-    ODIR := pobjs
+    ODIR := build/linux/pobjs
     shaders = lightingPhong.vert lightingPhong.frag 
     udflags = -USOLUTION -DPHONG_SOLUTION -DTR_SOLUTION -UEM -UEM_SOLUTION
     iblExtras = 
 else ifeq ($(v), sol)
     VFLAG := -DTR_SOLUTION -DSOLUTION
-    ODIR := sobjs
+    ODIR := build/linux/sobjs
     shaders =  finalSol.frag finalSol.vert lightingSol.frag lightingSol.vert reflSol.frag reflSol.vert shadowSol.frag shadowSol.vert 
     udflags = -DSOLUTION -UPHONG_SOLUTION -DTR_SOLUTION -UEM -UEM_SOLUTION
     iblExtras = ibl
 else ifeq ($(v), ref)
     VFLAG := -DTR_SOLUTION -DSOLUTION -DREFL
-    ODIR := robjs
+    ODIR := build/linux/robjs
     shaders = lightingSol.vert lightingSol.frag 
     udflags = -DSOLUTION -UPHONG_SOLUTION -DTR_SOLUTION -UEM -UEM_SOLUTION
     iblExtras = 
 else ifeq ($(v), em)
     VFLAG := -DEM
-    ODIR := eobjs
+    ODIR := build/linux/eobjs
     shaders = lighting.vert lighting.frag emulator.vert emulator.frag
     udflags = -USOLUTION -UPHONG_SOLUTION -UTR_SOLUTION -DEM -UEM_SOLUTION
     iblExtras = 
 else ifeq ($(v), emsol)
     VFLAG := -DSOLUTION -DTR_SOLUTION -DEM -DEM_SOLUTION
-    ODIR := esobjs
+    ODIR := build/linux/esobjs
     shaders = finalSol.frag finalSol.vert lightingSol.frag lightingSol.vert reflSol.frag reflSol.vert shadowSol.frag shadowSol.vert emulator.vert emulator.frag
     udflags = -DSOLUTION -UPHONG_SOLUTION -DTR_SOLUTION -DEM -DEM_SOLUTION
     iblExtras = 
 else
     VFLAG := 
-    ODIR := bobjs
+    ODIR := build/linux/bobjs
     shaders = lighting.vert lighting.frag 
     udflags = -USOLUTION -UPHONG_SOLUTION -UTR_SOLUTION -UEM -UEM_SOLUTION
     iblExtras = 
@@ -72,25 +72,25 @@ else
 endif
 
 # Where the compiler will search for source files.
-VPATH = $(LIBDIR)/imgui-master $(LIBDIR)/imgui-master/backends
+VPATH = src $(LIBDIR)/imgui-master $(LIBDIR)/imgui-master/backends
 
 # Where the .o files go
 vpath %.o  $(ODIR)
 
 CXX = g++
-CFLAGS = -g $(VFLAG) -I. -I$(LIBDIR)/glm -I$(LIBDIR)/imgui-master -I$(LIBDIR)/imgui-master/backends -I$(LIBDIR)  -I$(LIBDIR)/glfw/include
+CFLAGS = -g $(VFLAG) -Isrc -I$(LIBDIR)/glm -I$(LIBDIR)/imgui-master -I$(LIBDIR)/imgui-master/backends -I$(LIBDIR)  -I$(LIBDIR)/glfw/include
 
 CXXFLAGS = -std=c++11 $(CFLAGS) -DVK_TAB=9
 
-LIBS =  -L/usr/lib/x86_64-linux-gnu -L../$(LIBDIR) -L/usr/lib -L/usr/local/lib -lglbinding -lX11 -lGLU -lGL `pkg-config --static --libs glfw3`
+LIBS =  -L/usr/lib/x86_64-linux-gnu -L$(LIBDIR) -L/usr/lib -L/usr/local/lib -lglbinding -lX11 -lGLU -lGL `pkg-config --static --libs glfw3`
 
-CPPsrc = framework.cpp interact.cpp transform.cpp scene.cpp texture.cpp shapes.cpp object.cpp shader.cpp simplexnoise.cpp fbo.cpp emulator.cpp
+CPPsrc = HDR.cpp framework.cpp interact.cpp transform.cpp scene.cpp texture.cpp shapes.cpp object.cpp shader.cpp simplexnoise.cpp fbo.cpp emulator.cpp
 IMGUIsrc = imgui.cpp imgui_widgets.cpp imgui_draw.cpp imgui_demo.cpp imgui_impl_glfw.cpp imgui_impl_opengl3.cpp
 Csrc = rply.c
 
-headers = framework.h interact.h texture.h shapes.h object.h rply.h scene.h shader.h transform.h simplexnoise.h fbo.h emulator.h
-srcFiles = $(CPPsrc) $(Csrc) $(shaders) $(headers)
-extraFiles = framework.vcxproj Makefile room.ply textures skys
+headers = HDR.h framework.h interact.h texture.h shapes.h object.h rply.h scene.h shader.h transform.h simplexnoise.h fbo.h emulator.h
+srcFiles = $(addprefix src/,$(CPPsrc) $(Csrc) $(headers)) $(wildcard shaders/*)
+extraFiles = framework.sln framework.vcxproj framework.vcxproj.filters Makefile README.md assets docs
 
 pkgDir = /home/gherron/packages
 objs = $(patsubst %.cpp,%.o,$(CPPsrc)) $(patsubst %.cpp,%.o,$(IMGUIsrc)) $(patsubst %.c,%.o,$(Csrc))
@@ -98,7 +98,7 @@ target = $(ODIR)/framework.exe
 
 $(target): $(objs)
 	@echo Link $(target)
-	cd $(ODIR) && $(CXX) -g  -o ../$@  $(objs) $(LIBS)
+	$(CXX) -g -o $@ $(addprefix $(ODIR)/,$(objs)) $(LIBS)
 
 help:
 	@echo "Try:"
@@ -118,13 +118,13 @@ help:
 	@echo "   make v=emsol c=emsol zip // For whatever -- includes everything"
 
 run: $(target)
-	LD_LIBRARY_PATH="$(LIBDIR);$(LD_LIBRARY_PATH)" ./$(target)
+	LD_LIBRARY_PATH="$(LIBDIR):$(LD_LIBRARY_PATH)" ./$(target)
 
 gdb: $(target)
-	LD_LIBRARY_PATH="$(LIBDIR);$(LD_LIBRARY_PATH)" gdb ./$(target)
+	LD_LIBRARY_PATH="$(LIBDIR):$(LD_LIBRARY_PATH)" gdb ./$(target)
 
 what:
-	@echo VPATH = $(VPATH)
+	@echo VPATH = src $(VPATH)
 	@echo LIBS = $(LIBDIR)
 	@echo CFLAGS = $(CFLAGS)
 	@echo VFLAG = $(VFLAG)
@@ -136,7 +136,7 @@ what:
 	@echo udflags = $(udflags)
 
 clean:
-	rm -rf tobjs sobjs bobjs dependencies
+	rm -rf build/linux dependencies
 
 %.o: %.cpp
 	@echo Compile $<  $(VFLAG)
@@ -151,9 +151,9 @@ clean:
 zip:
 	rm -rf $(pkgDir)/$(pkgName) $(pkgDir)/$(pkgName).zip
 	mkdir $(pkgDir)/$(pkgName)
-	cp $(srcFiles) $(pkgDir)/$(pkgName)
+	cp -r src shaders $(pkgDir)/$(pkgName)
 	cp -r $(extraFiles) $(iblExtras) $(pkgDir)/$(pkgName)
-	cp -r ../libs $(pkgDir)/$(pkgName)
+	cp -r $(LIBDIR) $(pkgDir)/$(pkgName)
 	rm -rf $(pkgDir)/$(pkgName)/libs/.hg $(pkgDir)/$(pkgName)/libs/assimp $(pkgDir)/$(pkgName)/libs/bvh
 	cd $(pkgDir)/$(pkgName);  unifdef $(udflags)  -m  $(srcFiles) || /bin/true
 
@@ -166,6 +166,6 @@ ws:
 	@grep -P '\t' $(srcFiles)
 
 dependencies: 
-	g++ -MM $(CXXFLAGS) $(CPPsrc) > dependencies
+	g++ -MM $(CXXFLAGS) $(addprefix src/,$(CPPsrc)) > dependencies
 
-include dependencies
+-include dependencies

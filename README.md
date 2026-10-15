@@ -15,41 +15,60 @@ The implementation is based on *Rendering Snowing Scene on GPU* by Jun Zhang, Xi
 - **Displaced ground and floor geometry**, reconstructed normals, and snow material blending.
 - Integration with moment shadow maps, reflections, image-based lighting, screen-space ambient obscurance, and local lights.
 
+## Project layout
+
+```text
+src/                C++ sources and headers, including bundled utility code
+shaders/            GLSL vertex, fragment, and compute shaders
+assets/models/      Scene meshes
+assets/textures/    Material textures and normal maps
+assets/skies/       Sky images and HDR environment maps
+assets/generated/   Runtime-generated irradiance maps (ignored by Git)
+docs/images/        Screenshots and animations
+libs/               Local third-party dependencies (ignored by Git)
+build/              Build outputs and intermediate files (ignored by Git)
+```
+
+The solution, Visual Studio project, and Makefile stay at the root. Run the
+application with the repository root as its working directory; the Visual Studio
+project sets this automatically. Older workspace copies outside this repository
+are independent of this layout.
+
 ## Build and run
 
 ### Requirements
 
 - Visual Studio with the C++ desktop workload and the **v143** toolset for the supplied Windows project.
-- A GPU and driver supporting **OpenGL 4.3 / GLSL 4.30**, including compute shaders and image atomics. Although `framework.cpp` requests a 3.3 context, the snow update and compute shaders require 4.3 functionality; the actual context must provide it.
+- A GPU and driver supporting **OpenGL 4.3 / GLSL 4.30**, including compute shaders and image atomics. Although `src/framework.cpp` requests a 3.3 context, the snow update and compute shaders require 4.3 functionality; the actual context must provide it.
 - The framework dependencies under `libs/`: GLFW, glbinding, GLM, Dear ImGui with its GLFW/OpenGL backends, and stb headers. These dependencies are ignored by Git and must be supplied separately for a fresh clone. Windows library binaries must match the project's **Win32/x86** target.
 
 ### Required environment map
 
-`scene.cpp` currently loads this file during initialization:
+`src/scene.cpp` currently loads this file during initialization:
 
 ```text
-skys/overcast_soil_puresky_4k.hdr
+assets/skies/overcast_soil_puresky_4k.hdr
 ```
 
-The HDR was removed from this branch and must be restored locally before running. Alternatively, change the `HDR` constructor path in `Scene::InitializeScene` to an available environment map, such as `skys/Road_to_MonumentValley_Ref.hdr`. Using another map changes the sky and image-based lighting. The program exits if the configured HDR cannot be loaded.
+The HDR was removed from this branch and must be restored locally before running. Alternatively, change the `HDR` constructor path in `Scene::InitializeScene` to an available environment map, such as `assets/skies/Road_to_MonumentValley_Ref.hdr`. Using another map changes the sky and image-based lighting. The program exits if the configured HDR cannot be loaded.
 
 ### Windows
 
 1. Open `framework.sln` in Visual Studio.
-2. Select **Debug | Win32** and ensure the required headers and libraries are available under `libs/`.
+2. Select **Debug | x86** and ensure the required headers and libraries are available under `libs/`.
 3. Set the debugger working directory to the repository root so relative shader, texture, and sky paths resolve.
 4. Build and run the `framework` project.
 
 From a Visual Studio Developer PowerShell, the equivalent build and launch commands are:
 
 ```powershell
-msbuild framework.sln /p:Configuration=Debug /p:Platform=Win32
-.\Debug\framework.exe
+msbuild framework.sln /p:Configuration=Debug /p:Platform=x86
+.\build\Win32\Debug\framework.exe
 ```
 
-Run these commands from the repository root. The project copies `glbinding.dll` into the output directory after building. Initialization also regenerates `irradiance_map.hdr` from the selected environment map.
+Run these commands from the repository root. The project copies `glbinding.dll` into the output directory after building. Initialization also regenerates `assets/generated/irradiance_map.hdr` from the selected environment map.
 
-The repository includes a Linux `Makefile`, but it is inherited from the framework and is not a verified build path for this branch. In particular, its source list omits `HDR.cpp`; it needs adjustment before use.
+The repository includes a Linux `Makefile`, but it is inherited from the framework and is not a verified build path for this branch. In particular, its source list omits `src/HDR.cpp`; it needs adjustment before use.
 
 ## Controls
 
@@ -147,12 +166,12 @@ The images and animations below show falling particles, snow coverage, displaced
 
 | File | Responsibility |
 | --- | --- |
-| `scene.cpp` / `scene.h` | Snow resources, defaults, controls, pass orchestration, and synchronization. |
-| `fbo.cpp` / `fbo.h` | Framebuffer setup, including dual particle attachments. |
-| `glsl shaders/snowUpdate.vert` / `snowUpdate.frag` | Fullscreen particle simulation and atomic landing deposition. |
-| `glsl shaders/snowDeposit.comp` | Height-field stability checks and redistribution. |
-| `glsl shaders/snowRender.vert` / `snowRender.frag` | Particle position fetch and point sprite rendering. |
-| `glsl shaders/gBuffer.vert` / `gBuffer.frag` | Snow displacement, normal reconstruction, and material blending. |
+| `src/scene.cpp` / `src/scene.h` | Snow resources, defaults, controls, pass orchestration, and synchronization. |
+| `src/fbo.cpp` / `src/fbo.h` | Framebuffer setup, including dual particle attachments. |
+| `shaders/snowUpdate.vert` / `snowUpdate.frag` | Fullscreen particle simulation and atomic landing deposition. |
+| `shaders/snowDeposit.comp` | Height-field stability checks and redistribution. |
+| `shaders/snowRender.vert` / `snowRender.frag` | Particle position fetch and point sprite rendering. |
+| `shaders/gBuffer.vert` / `gBuffer.frag` | Snow displacement, normal reconstruction, and material blending. |
 
 ## References
 
